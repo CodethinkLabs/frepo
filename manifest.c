@@ -201,12 +201,16 @@ manifest_t* manifest_read(const char* path)
 	xml_tag_t* manifest_xml
 		= xml_document_parse(manifest_string);
 	if (!manifest_xml)
+	{
+		fprintf(stderr, "Error: Failed to parse xml in manifest file.\n");
 		return NULL;
+	}
 
 	manifest_t* manifest
 		= manifest_parse(manifest_xml);
 	if (!manifest)
 	{
+		fprintf(stderr, "Error: Failed to parse manifest from xml document.\n");
 		xml_tag_delete(manifest_xml);
 		return NULL;
 	}

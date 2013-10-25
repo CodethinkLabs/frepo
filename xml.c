@@ -14,6 +14,26 @@ bool       xml__tag_insert_tag(xml_tag_t* tag, xml_tag_t* child);
 
 
 
+unsigned xml__parse_comment(const char* source)
+{
+	if (!source)
+		return 0;
+	if (strncmp(source, "<!--", 4) != 0)
+		return 0;
+
+	unsigned i;
+	for (i = 4; source[i] != '\0'; i++)
+	{
+		if (strncmp(&source[i], "-->", 3) == 0)
+		{
+			i += 3;
+			break;
+		}
+	}
+
+	return i;
+}
+
 unsigned xml__parse_whitespace(const char* source)
 {
 	if (!source)
@@ -21,6 +41,14 @@ unsigned xml__parse_whitespace(const char* source)
 
 	unsigned i;
 	for (i = 0; isspace(source[i]); i++);
+
+	unsigned c = xml__parse_comment(&source[i]);
+	if (c)
+	{
+		i += c;
+		i += xml__parse_whitespace(&source[i]);
+	}
+
 	return i;
 }
 
