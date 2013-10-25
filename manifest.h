@@ -25,4 +25,7 @@ extern void        manifest_delete(manifest_t* manifest);
 extern manifest_t* manifest_parse(xml_tag_t* document);
 extern manifest_t* manifest_read(const char* path);
 
+extern manifest_t* manifest_copy(manifest_t* a);
+extern manifest_t* manifest_subtract(manifest_t* a, manifest_t* b);
+
 #endif

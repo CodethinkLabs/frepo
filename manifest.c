@@ -64,6 +64,7 @@ manifest_t* manifest_parse(xml_tag_t* document)
 
 	manifest_t* manifest = (manifest_t*)malloc(
 		sizeof(manifest_t) + (project_count * sizeof(project_t)));
+	if (!manifest) return NULL;
 	manifest->project_count = project_count;
 	manifest->project = (project_t*)((uintptr_t)manifest + sizeof(manifest_t));
 
@@ -213,6 +214,69 @@ manifest_t* manifest_read(const char* path)
 		fprintf(stderr, "Error: Failed to parse manifest from xml document.\n");
 		xml_tag_delete(manifest_xml);
 		return NULL;
+	}
+
+	return manifest;
+}
+
+
+
+manifest_t* manifest_copy(manifest_t* a)
+{
+	if (!a) return NULL;
+
+	manifest_t* manifest = (manifest_t*)malloc(
+		sizeof(manifest_t) + (a->project_count * sizeof(project_t)));
+	if (!manifest) return NULL;
+	manifest->project_count = a->project_count;
+	manifest->project = (project_t*)((uintptr_t)manifest + sizeof(manifest_t));
+
+	unsigned i;
+	for (i = 0; i < a->project_count; i++)
+		manifest->project[i] = a->project[i];
+
+	return manifest;
+}
+
+
+
+manifest_t* manifest_subtract(manifest_t* a, manifest_t* b)
+{
+	if (!a) return NULL;
+	if (!b) return manifest_copy(a);
+
+	unsigned project_count = a->project_count;
+
+	unsigned i, j;
+	for (i = 0; i < a->project_count; i++)
+	{
+		for (j = 0; j < b->project_count; j++)
+		{
+			if (strcmp(a->project[i].path, b->project[j].path) == 0)
+				project_count--;
+		}
+	}
+
+	if (project_count == 0)
+		return NULL;
+
+	manifest_t* manifest = (manifest_t*)malloc(
+		sizeof(manifest_t) + (project_count * sizeof(project_t)));
+	if (!manifest) return NULL;
+	manifest->project_count = project_count;
+	manifest->project = (project_t*)((uintptr_t)manifest + sizeof(manifest_t));
+
+	unsigned k;
+	for (i = 0, k = 0; i < a->project_count; i++)
+	{
+		for (j = 0; j < b->project_count; j++)
+		{
+			if (strcmp(a->project[i].path, b->project[j].path) == 0)
+				break;
+		}
+
+		if (j >= b->project_count)
+			manifest->project[k++] = a->project[i];
 	}
 
 	return manifest;

@@ -57,22 +57,251 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 
 static int frepo_sync(manifest_t* manifest, const char* manifest_path)
 {
-	fprintf(stderr, "Error: Sync function not yet implemented.\n");
+	char* manifest_head_old = NULL;
+	char* manifest_head_latest = NULL;
+	manifest_t* manifest_updated = NULL;
+	manifest_t* manifest_old = NULL;
+	manifest_t* manifest_new = NULL;
+	manifest_t* manifest_unchanged = NULL;
 
-	/* TODO - Find manifest. */
-	/* TODO - Sync manifest. */
+	char pdir[PATH_MAX];
+	if (getcwd(pdir, PATH_MAX) != pdir)
+	{
+		fprintf(stderr, "Error: Failed to store parent directory.\n");
+		goto frepo_sync_failed;
+	}
 
-	/* TODO - Check for uncommitted changes/branches before deletion. */
-	/* TODO - Delete removed repositories. */
+	bool manifest_uncommitted_changes;
+	if (!git_uncomitted_changes("manifest", &manifest_uncommitted_changes))
+	{
+		fprintf(stderr, "Error: Failed to check for uncommitted changes"
+			" in your manifest.\n");
+		goto frepo_sync_failed;
+	}
+	else if (manifest_uncommitted_changes)
+	{
+		fprintf(stderr, "Error: There are uncommitted changes in your manifest,"
+			" commit or discard these to continue.\n");
+		goto frepo_sync_failed;
+	}
+
+	manifest_head_old
+		= git_current_commit("manifest");
+	if (!manifest_head_old)
+	{
+		fprintf(stderr, "Error: Failed to get local manifest commit.\n");
+		goto frepo_sync_failed;
+	}
+
+	printf("Updating manifest.\n");
+
+	if (!git_fetch("manifest")
+		|| !git_pull("manifest"))
+	{
+		fprintf(stderr, "Error: Failed to update manifest.\n");
+		goto frepo_sync_failed;
+	}
+
+	manifest_head_latest
+		= git_current_commit("manifest");
+	if (!manifest_head_latest)
+	{
+		fprintf(stderr, "Error: Failed to get latest manifest commit.\n");
+		goto frepo_sync_failed;
+	}
+
+	bool manifest_changed
+		= (strcmp(manifest_head_old, manifest_head_latest) != 0);
+
+	if (manifest_changed)
+	{
+		manifest_updated = manifest_read(manifest_path);
+		if (!manifest_updated)
+		{
+			fprintf(stderr, "Error: Failed to read new manifest.\n");
+			goto frepo_sync_failed;
+		}
+
+		manifest_old = manifest_subtract(
+			manifest, manifest_updated);
+		if (manifest_old)
+		{
+			fprintf(stdout, "%u repositories will be removed.\n",
+				manifest_old->project_count);
+
+			unsigned i;
+			for (i = 0; i < manifest_old->project_count; i++)
+			{
+				bool uncommitted_changes;
+				if (!git_uncomitted_changes(
+					manifest_old->project[i].path, &uncommitted_changes))
+				{
+					fprintf(stderr, "Error: '%s' is deprecated but can't remove"
+						" because checking for uncommitted changes failed.\n",
+						manifest_old->project[i].name);
+					goto frepo_sync_failed;
+				}
+				else if (uncommitted_changes)
+				{
+					fprintf(stderr, "Error: '%s' is deprecated but can't remove"
+						" because it has uncommitted changes.\n",
+						manifest_old->project[i].name);
+					goto frepo_sync_failed;
+				}
+			}
+		}
+
+		manifest_new = manifest_subtract(
+			manifest_updated, manifest);
+
+		manifest_unchanged = manifest_subtract(
+			manifest_updated, manifest_new);
+		if (!manifest_unchanged)
+		{
+			fprintf(stderr, "Error: Failed to read new manifest.\n");
+			goto frepo_sync_failed;
+		}
+	}
+	else
+	{
+		manifest_unchanged = manifest_copy(manifest);
+	}
+
+	if (manifest_unchanged)
+	{
+		unsigned i;
+		for (i = 0; i < manifest_unchanged->project_count; i++)
+		{
+			bool uncommitted_changes;
+			if (!git_uncomitted_changes(
+				manifest_unchanged->project[i].path, &uncommitted_changes))
+			{
+				fprintf(stderr, "Error: '%s' is deprecated but can't remove"
+					" because checking for uncommitted changes failed.\n",
+					manifest_unchanged->project[i].name);
+				goto frepo_sync_failed;
+			}
+			else if (uncommitted_changes)
+			{
+				fprintf(stderr, "Error: '%s' is deprecated but can't remove"
+					" because it has uncommitted changes.\n",
+					manifest_old->project[i].name);
+				goto frepo_sync_failed;
+			}
+		}
+	}
+
+	if (manifest_new)
+	{
+		unsigned i;
+		for (i = 0; i < manifest_new->project_count; i++)
+		{
+			printf("Cloning new repository (%u/%u) '%s'.\n",
+				(i + 1), manifest_new->project_count,
+				manifest_new->project[i].path);
+
+			if (!git_clone(
+				manifest_new->project[i].remote,
+				manifest_new->project[i].name,
+				manifest_new->project[i].path,
+				manifest_new->project[i].remote_name,
+				manifest_new->project[i].revision,
+				false))
+			{
+				unsigned j;
+				for (j = 0; j < i; j++)
+					git_remove(manifest_new->project[i].path);
+				fprintf(stderr, "Error: Failed to pull new repository '%s'.\n",
+					manifest_new->project[i].path);
+				goto frepo_sync_failed;
+			}
+		}
+	}
+
+	if (manifest_unchanged)
+	{
+		unsigned i;
+		for (i = 0; i < manifest_unchanged->project_count; i++)
+		{
+			printf("Updating existing repository (%u/%u) '%s'.\n",
+				(i + 1), manifest_unchanged->project_count,
+				manifest_unchanged->project[i].path);
+
+			char* revision = git_current_branch(
+				manifest_unchanged->project[i].path);
+			if (!revision)
+			{
+				fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
+					manifest_unchanged->project[i].path);
+				continue;
+			}
+
+			bool revision_differs
+				= (strcmp(revision, manifest_unchanged->project[i].revision) != 0);
+			if (revision_differs && !git_checkout(
+				manifest_unchanged->project[i].path,
+				manifest_unchanged->project[i].revision))
+			{
+				free(revision);
+				fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
+					manifest_unchanged->project[i].revision,
+					manifest_unchanged->project[i].path);
+				continue;
+			}
+
+			if (!git_fetch(manifest_unchanged->project[i].path)
+				|| !git_pull(manifest_unchanged->project[i].path))
+			{
+				fprintf(stderr, "Error: Failed to update '%s'.\n",
+					manifest_unchanged->project[i].path);
+			}
+
+			if (revision_differs && !git_checkout(
+				manifest_unchanged->project[i].path,
+				manifest_unchanged->project[i].revision))
+			{
+				fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
+					manifest_unchanged->project[i].path, revision);
+			}
+
+			free(revision);
+		}
+	}
+
+	if (manifest_old)
+	{
+		unsigned i;
+		for (i = 0; i < manifest_old->project_count; i++)
+		{
+			printf("Removing old repository (%u/%u) '%s'.\n",
+				(i + 1), manifest_old->project_count,
+				manifest_old->project[i].path);
+
+			if (!git_remove(manifest_old->project[i].path))
+				fprintf(stderr, "Warning: Failed to remove deprecated"
+					" project '%s'.\n", manifest_old->project[i].path);
+		}
+	}
+
 	/* TODO - Delete unused directories. */
 
-	/* TODO - Check for uncommitted changes. */
+	manifest_delete(manifest_updated);
+	manifest_delete(manifest_old);
+	manifest_delete(manifest_new);
+	manifest_delete(manifest_unchanged);
+	free(manifest_head_latest);
+	free(manifest_head_old);
+	return EXIT_SUCCESS;
 
-	/* TODO - Switch to manifest branch. */
-	/* TODO - Update existing repositories. */
-	/* TODO - Switch back to previous branch. */
-
-	/* TODO - Pull new repositories. */
+frepo_sync_failed:
+	if (manifest_head_old)
+		git_reset_hard("manifest", manifest_head_old);
+	manifest_delete(manifest_updated);
+	manifest_delete(manifest_old);
+	manifest_delete(manifest_new);
+	manifest_delete(manifest_unchanged);
+	free(manifest_head_latest);
+	free(manifest_head_old);
 	return EXIT_FAILURE;
 }
 
