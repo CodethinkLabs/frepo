@@ -51,6 +51,28 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 				manifest->project[i].path);
 			return EXIT_FAILURE;
 		}
+
+		unsigned j;
+		for (j = 0; j < manifest->project[i].copyfile_count; j++)
+		{
+			char cmd[strlen(manifest->project[i].path)
+				+ strlen(manifest->project[i].copyfile[j].source)
+				+ strlen(manifest->project[i].copyfile[j].dest) + 16];
+			sprintf(cmd, "cp %s/%s %s",
+				manifest->project[i].path,
+				manifest->project[i].copyfile[j].source,
+				manifest->project[i].copyfile[j].dest);
+			if (system(cmd) != EXIT_SUCCESS)
+			{
+				fprintf(stderr,
+					"Error: Failed to perform copy '%s' to '%s'"
+					" for project '%s'\n",
+					manifest->project[i].copyfile[j].source,
+					manifest->project[i].copyfile[j].dest,
+					manifest->project[i].path);
+				return EXIT_FAILURE;
+			}
+		}
 	}
 	return EXIT_SUCCESS;
 }
@@ -208,12 +230,37 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path)
 				manifest_new->project[i].revision,
 				false))
 			{
-				unsigned j;
-				for (j = 0; j < i; j++)
-					git_remove(manifest_new->project[i].path);
+				unsigned k;
+				for (k = 0; k < i; k++)
+					git_remove(manifest_new->project[k].path);
 				fprintf(stderr, "Error: Failed to pull new repository '%s'.\n",
 					manifest_new->project[i].path);
 				goto frepo_sync_failed;
+			}
+
+			unsigned j;
+			for (j = 0; j < manifest_new->project[i].copyfile_count; j++)
+			{
+				char cmd[strlen(manifest_new->project[i].path)
+					+ strlen(manifest_new->project[i].copyfile[j].source)
+					+ strlen(manifest_new->project[i].copyfile[j].dest) + 16];
+				sprintf(cmd, "cp %s/%s %s",
+					manifest_new->project[i].path,
+					manifest_new->project[i].copyfile[j].source,
+					manifest_new->project[i].copyfile[j].dest);
+				if (system(cmd) != EXIT_SUCCESS)
+				{
+					unsigned k;
+					for (k = 0; k < i; k++)
+						git_remove(manifest_new->project[k].path);
+					fprintf(stderr,
+						"Error: Failed to perform copy '%s' to '%s'"
+						" for project '%s'\n",
+						manifest_new->project[i].copyfile[j].source,
+						manifest_new->project[i].copyfile[j].dest,
+						manifest_new->project[i].path);
+					goto frepo_sync_failed;
+				}
 			}
 		}
 	}
@@ -254,6 +301,30 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path)
 			{
 				fprintf(stderr, "Error: Failed to update '%s'.\n",
 					manifest_unchanged->project[i].path);
+			}
+
+			unsigned j;
+			for (j = 0; j < manifest_unchanged->project[i].copyfile_count; j++)
+			{
+				char cmd[strlen(manifest_unchanged->project[i].path)
+					+ strlen(manifest_unchanged->project[i].copyfile[j].source)
+					+ strlen(manifest_unchanged->project[i].copyfile[j].dest) + 16];
+				sprintf(cmd, "cp %s/%s %s",
+					manifest_unchanged->project[i].path,
+					manifest_unchanged->project[i].copyfile[j].source,
+					manifest_unchanged->project[i].copyfile[j].dest);
+				if (system(cmd) != EXIT_SUCCESS)
+				{
+					unsigned k;
+					for (k = 0; k < i; k++)
+						git_remove(manifest_unchanged->project[k].path);
+					fprintf(stderr,
+						"Error: Failed to perform copy '%s' to '%s'"
+						" for project '%s'\n",
+						manifest_unchanged->project[i].copyfile[j].source,
+						manifest_unchanged->project[i].copyfile[j].dest,
+						manifest_unchanged->project[i].path);
+				}
 			}
 
 			if (revision_differs && !git_checkout(

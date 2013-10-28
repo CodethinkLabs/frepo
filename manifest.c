@@ -17,6 +17,10 @@ void manifest_delete(manifest_t* manifest)
 	if (!manifest)
 		return;
 
+	unsigned i;
+	for (i = 0; i < manifest->project_count; i++)
+		free(manifest->project[i].copyfile);
+
 	if (manifest->document)
 		xml_tag_delete(manifest->document);
 	free(manifest);
@@ -67,6 +71,7 @@ manifest_t* manifest_parse(xml_tag_t* document)
 	if (!manifest) return NULL;
 	manifest->project_count = project_count;
 	manifest->project = (project_t*)((uintptr_t)manifest + sizeof(manifest_t));
+	manifest->document = NULL;
 
 	xml_tag_t*  default_remote   = (remote_count ? remote[0] : NULL);
 	const char* default_revision = NULL;
@@ -107,14 +112,16 @@ manifest_t* manifest_parse(xml_tag_t* document)
 		}
 		else if (strcmp(mdoc->tag[i]->name, "project") == 0)
 		{
-			manifest->project[j].path
+			project_t* project = &manifest->project[j];
+
+			project->path
 				= xml_tag_field(mdoc->tag[i], "path");
-			manifest->project[j].name
+			project->name
 				= xml_tag_field(mdoc->tag[i], "name");
 
-			manifest->project[j].remote
+			project->remote
 				= xml_tag_field(mdoc->tag[i], "remote");
-			if (manifest->project[j].remote)
+			if (project->remote)
 			{
 				unsigned r;
 				for (r = 0; r < remote_count; r++)
@@ -122,11 +129,11 @@ manifest_t* manifest_parse(xml_tag_t* document)
 					const char* rname
 						= xml_tag_field(remote[r], "name");
 					if (rname
-						&& (strcmp(rname, manifest->project[j].remote) == 0))
+						&& (strcmp(rname, project->remote) == 0))
 					{
-						manifest->project[j].remote
+						project->remote
 							= xml_tag_field(remote[r], "fetch");
-						manifest->project[j].remote_name
+						project->remote_name
 							= xml_tag_field(remote[r], "name");
 						break;
 					}
@@ -135,32 +142,82 @@ manifest_t* manifest_parse(xml_tag_t* document)
 				{
 					fprintf(stderr,
 						"Error: Invalid remote name '%s' in project tag.\n",
-						manifest->project[j].remote);
+						project->remote);
 					free(manifest);
 					return NULL;
 				}
 			}
 			else
 			{
-				manifest->project[j].remote
+				project->remote
 					= xml_tag_field(default_remote, "fetch");
-				manifest->project[j].remote_name
+				project->remote_name
 					= xml_tag_field(default_remote, "name");
 			}
 
-			manifest->project[j].revision
+			project->revision
 				= xml_tag_field(mdoc->tag[i], "revision");
-			if (!manifest->project[j].revision)
-				manifest->project[j].revision = default_revision;
+			if (!project->revision)
+				project->revision = default_revision;
 
-			if (!manifest->project[j].path
-				|| !manifest->project[j].name
-				|| !manifest->project[j].remote
-				|| !manifest->project[j].revision)
+			project->copyfile_count = 0;
+			project->copyfile = NULL;
+
+			unsigned k;
+			for (k = 0; k < mdoc->tag[i]->tag_count; k++)
+			{
+				if (strcmp(mdoc->tag[i]->tag[k]->name, "copyfile") != 0)
+				{
+					fprintf(stderr,
+						"Warning: Unknown project sub-tag '%s'.\n",
+						mdoc->tag[i]->tag[k]->name);
+					continue;
+				}
+
+				copyfile_t* ncopyfile
+					= (copyfile_t*)realloc(project->copyfile,
+						(project->copyfile_count + 1) * sizeof(copyfile_t));
+				if (!ncopyfile)
+				{
+					fprintf(stderr,
+						"Error: Failed to add copyfile to project.\n");
+					manifest_delete(manifest);
+					return NULL;
+				}
+
+				project->copyfile = ncopyfile;
+				project->copyfile[project->copyfile_count].source
+					= xml_tag_field(mdoc->tag[i]->tag[k], "src");
+				project->copyfile[project->copyfile_count].dest
+					= xml_tag_field(mdoc->tag[i]->tag[k], "dest");
+
+				if (!project->copyfile[project->copyfile_count].source)
+				{
+					fprintf(stderr,
+						"Error: Invalid copyfile tag, missing source field.\n");
+					manifest_delete(manifest);
+					return NULL;
+				}
+
+				if (!project->copyfile[project->copyfile_count].dest)
+				{
+					fprintf(stderr,
+						"Error: Invalid copyfile tag, missing dest field.\n");
+					manifest_delete(manifest);
+					return NULL;
+				}
+
+				project->copyfile_count++;
+			}
+
+			if (!project->path
+				|| !project->name
+				|| !project->remote
+				|| !project->revision)
 			{
 				fprintf(stderr,
 					"Error: Invalid project tag, missing field.\n");
-				free(manifest);
+				manifest_delete(manifest);
 				return NULL;
 			}
 
@@ -233,7 +290,32 @@ manifest_t* manifest_copy(manifest_t* a)
 
 	unsigned i;
 	for (i = 0; i < a->project_count; i++)
+	{
 		manifest->project[i] = a->project[i];
+
+		manifest->project[i].copyfile = NULL;
+		if (a->project[i].copyfile_count)
+		{
+			manifest->project[i].copyfile
+				= (copyfile_t*)malloc(
+					a->project[i].copyfile_count * sizeof(copyfile_t));
+			if (!manifest->project[i].copyfile)
+			{
+				unsigned j;
+				for (j = i; j < a->project_count; j++)
+				{
+					manifest->project[j].copyfile = NULL;
+					manifest->project[j].copyfile_count = 0;
+				}
+				manifest_delete(manifest);
+				return NULL;
+			}
+			memcpy(
+				manifest->project[i].copyfile,
+				a->project[i].copyfile,
+				(a->project[i].copyfile_count * sizeof(copyfile_t)));
+		}
+	}
 
 	return manifest;
 }
@@ -276,7 +358,31 @@ manifest_t* manifest_subtract(manifest_t* a, manifest_t* b)
 		}
 
 		if (j >= b->project_count)
-			manifest->project[k++] = a->project[i];
+		{
+			manifest->project[k] = a->project[i];
+			if (a->project[i].copyfile_count)
+			{
+				manifest->project[k].copyfile
+					= (copyfile_t*)malloc(
+						manifest->project[i].copyfile_count * sizeof(copyfile_t));
+				if (!manifest->project[k].copyfile)
+				{
+					unsigned l;
+					for (l = k; l < project_count; l++)
+					{
+						manifest->project[l].copyfile = NULL;
+						manifest->project[l].copyfile_count = 0;
+					}
+					manifest_delete(manifest);
+					return NULL;
+				}
+				memcpy(
+					manifest->project[k].copyfile,
+					a->project[i].copyfile,
+					(a->project[i].copyfile_count * sizeof(copyfile_t)));
+			}
+			k++;
+		}
 	}
 
 	return manifest;
