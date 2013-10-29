@@ -27,7 +27,7 @@ typedef enum
 void print_usage(const char* prog)
 {
 	printf("%s init name -u manifest [-b branch] [--mirror]\n", prog);
-	printf("%s sync\n", prog);
+	printf("%s sync [-f]\n", prog);
 	printf("%s list\n", prog);
 	printf("%s forall -c command\n", prog);
 }
@@ -77,7 +77,7 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 	return EXIT_SUCCESS;
 }
 
-static int frepo_sync(manifest_t* manifest, const char* manifest_path)
+static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool force)
 {
 	char* manifest_head_old = NULL;
 	char* manifest_head_latest = NULL;
@@ -146,9 +146,18 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path)
 
 		manifest_old = manifest_subtract(
 			manifest, manifest_updated);
-		if (manifest_old)
+		if (manifest_old && (manifest_old->project_count > 0))
 		{
-			fprintf(stdout, "%u repositories will be removed.\n",
+			if (!force)
+			{
+				fprintf(stderr,
+					"Changes to the manifest require repositories"
+					" to be deleted. You must sync with the force"
+					" flag '-f' to delete repositories.\n");
+				goto frepo_sync_failed;
+			}
+
+			printf("%u repositories will be removed.\n",
 				manifest_old->project_count);
 
 			unsigned i;
@@ -194,6 +203,10 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path)
 		unsigned i;
 		for (i = 0; i < manifest_unchanged->project_count; i++)
 		{
+			printf("Checking for uncommitted changes in '%s' (%u/%u).\n",
+				manifest_unchanged->project[i].path,
+				(i + 1), manifest_unchanged->project_count);
+
 			bool uncommitted_changes;
 			if (!git_uncomitted_changes(
 				manifest_unchanged->project[i].path, &uncommitted_changes))
@@ -492,6 +505,7 @@ int main(int argc, char* argv[])
 	const char* repo   = NULL;
 	const char* branch = NULL;
 	bool        mirror = false;
+	bool        force  = false;
 
 	int    fa_argc = 0;
 	char** fa_argv = NULL;
@@ -578,6 +592,17 @@ int main(int argc, char* argv[])
 					fa_argv = &argv[a + 1];
 					a = (argc - 1);
 					break;
+				case 'f':
+					if (command != frepo_command_sync)
+					{
+						fprintf(stderr,
+							"Error: -f flag invalid for command.\n");
+						print_usage(argv[0]);
+						return EXIT_FAILURE;
+					}
+
+					force = true;
+					break;
 				default:
 					fprintf(stderr,
 						"Error: Invalid flag '%s'.\n", argv[a]);
@@ -649,7 +674,7 @@ int main(int argc, char* argv[])
 			ret = frepo_init(manifest, mirror);
 			break;
 		case frepo_command_sync:
-			ret = frepo_sync(manifest, manifest_path);
+			ret = frepo_sync(manifest, manifest_path, force);
 			break;
 		case frepo_command_forall:
 			ret = frepo_forall(manifest, fa_argc, fa_argv);
