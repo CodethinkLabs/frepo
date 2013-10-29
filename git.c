@@ -158,6 +158,13 @@ static char* git__pipe_read(const char* cmd)
 		read += fread(&result[read], 1, (size - read), fp);
 	} while (read >= size);
 
+	result[read] = '\0';
+
+	char* nresult
+		= (char*)realloc(
+			result, (read + 1));
+	if (nresult) result = nresult;
+
 	pclose(fp);
 	return result;
 }
