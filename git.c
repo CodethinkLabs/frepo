@@ -173,7 +173,7 @@ char* git_current_branch(const char* path)
 		return NULL;
 
 	char* branch
-		= git__pipe_read("git branch --contains HEAD --no-color | sed s/\\*\\ //");
+		= git__pipe_read("git rev-parse --symbolic-full-name --abbrev-ref HEAD");
 	assert(chdir(pdir) == 0);
 	return branch;
 }
