@@ -158,6 +158,11 @@ static char* git__pipe_read(const char* cmd)
 		read += fread(&result[read], 1, (size - read), fp);
 	} while (read >= size);
 
+	if (read == 0)
+		return NULL;
+
+	if (result[read - 1] == '\n')
+		read--;
 	result[read] = '\0';
 
 	char* nresult
@@ -196,7 +201,7 @@ char* git_current_commit(const char* path)
 		return NULL;
 
 	char* commit
-		= git__pipe_read("git show --pretty=format:%H");
+		= git__pipe_read("git rev-parse HEAD");
 	assert(chdir(pdir) == 0);
 	return commit;
 }
