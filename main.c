@@ -39,6 +39,10 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 	unsigned i;
 	for (i = 0; i < manifest->project_count; i++)
 	{
+		printf("Cloning new repository (%u/%u) '%s'.\n",
+			(i + 1), manifest->project_count,
+			manifest->project[i].path);
+
 		if (!git_clone(
 			manifest->project[i].remote,
 			manifest->project[i].name,
