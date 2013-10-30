@@ -29,7 +29,7 @@ void print_usage(const char* prog)
 	printf("%s init name -u manifest [-b branch] [--mirror]\n", prog);
 	printf("%s sync [-f]\n", prog);
 	printf("%s list\n", prog);
-	printf("%s forall -c command\n", prog);
+	printf("%s forall [-p] -c command\n", prog);
 }
 
 
@@ -399,7 +399,7 @@ static int frepo_list(manifest_t* manifest)
 	return EXIT_SUCCESS;
 }
 
-static int frepo_forall(manifest_t* manifest, int argc, char** argv)
+static int frepo_forall(manifest_t* manifest, int argc, char** argv, bool print)
 {
 	if (!manifest)
 		return EXIT_FAILURE;
@@ -433,6 +433,9 @@ static int frepo_forall(manifest_t* manifest, int argc, char** argv)
 	unsigned j;
 	for (j = 0; j < manifest->project_count; j++)
 	{
+		if (print)
+			printf("project %s\n", manifest->project[j].path);
+
 		setenv("REPO_PROJECT", manifest->project[j].name, 1);
 		setenv("REPO_PATH", manifest->project[j].path, 1);
 
@@ -506,6 +509,7 @@ int main(int argc, char* argv[])
 	const char* branch = NULL;
 	bool        mirror = false;
 	bool        force  = false;
+	bool        print  = false;
 
 	int    fa_argc = 0;
 	char** fa_argv = NULL;
@@ -592,6 +596,17 @@ int main(int argc, char* argv[])
 					fa_argv = &argv[a + 1];
 					a = (argc - 1);
 					break;
+				case 'p':
+					if (command != frepo_command_forall)
+					{
+						fprintf(stderr,
+							"Error: -p flag invalid for command.\n");
+						print_usage(argv[0]);
+						return EXIT_FAILURE;
+					}
+
+					print = true;
+					break;
 				case 'f':
 					if (command != frepo_command_sync)
 					{
@@ -677,7 +692,7 @@ int main(int argc, char* argv[])
 			ret = frepo_sync(manifest, manifest_path, force);
 			break;
 		case frepo_command_forall:
-			ret = frepo_forall(manifest, fa_argc, fa_argv);
+			ret = frepo_forall(manifest, fa_argc, fa_argv, print);
 			break;
 		default:
 			ret = frepo_list(manifest);
