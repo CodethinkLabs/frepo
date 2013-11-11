@@ -27,6 +27,13 @@ bool git_clone(
 		+ (remote_name ? strlen(remote_name) + 10 : 0)
 		+ (branch ? strlen(branch) + 4 : 0) + 64];
 
+	if (branch)
+	{
+		sprintf(cmd, "git ls-remote --exit-code %s %s", repo, branch);
+		if (system(cmd) != EXIT_SUCCESS)
+			return false;
+	}
+
 	sprintf(cmd, "git clone %s", repo);
 
 	if (path)
@@ -56,7 +63,7 @@ bool git_clone(
 	if (mirror)
 		strcat(cmd, " --mirror");
 
-	return (system(cmd) == 0);
+	return (system(cmd) == EXIT_SUCCESS);
 }
 
 
