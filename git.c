@@ -29,7 +29,17 @@ bool git_clone(
 
 	if (branch)
 	{
-		sprintf(cmd, "git ls-remote --exit-code %s %s", repo, branch);
+		sprintf(cmd, "git ls-remote --exit-code %s", repo);
+
+		if (path)
+		{
+			strcat(cmd, "/");
+			strcat(cmd, path);
+		}
+
+		strcat(cmd, " ");
+		strcat(cmd, branch);
+
 		if (system(cmd) != EXIT_SUCCESS)
 			return false;
 	}
