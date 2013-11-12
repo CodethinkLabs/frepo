@@ -27,7 +27,7 @@ typedef enum
 void print_usage(const char* prog)
 {
 	printf("%s init name -u manifest [-b branch] [--mirror]\n", prog);
-	printf("%s sync [-f]\n", prog);
+	printf("%s sync [-f] [-b branch]\n", prog);
 	printf("%s list\n", prog);
 	printf("%s forall [-p] -c command\n", prog);
 }
@@ -81,8 +81,9 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 	return EXIT_SUCCESS;
 }
 
-static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool force)
+static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool force, const char* branch)
 {
+	char* manifest_branch_old = NULL;
 	char* manifest_head_old = NULL;
 	char* manifest_head_latest = NULL;
 	manifest_t* manifest_updated = NULL;
@@ -120,6 +121,16 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 	}
 
 	printf("Updating manifest.\n");
+
+	if (branch)
+	{
+		manifest_branch_old = git_current_branch("manifest");
+		if (!git_checkout("manifest", branch))
+		{
+			fprintf(stderr, "Error: Failed to checkout manifest branch.\n");
+			goto frepo_sync_failed;
+		}
+	}
 
 	if (!git_fetch("manifest")
 		|| !git_pull("manifest"))
@@ -379,9 +390,12 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 	manifest_delete(manifest_unchanged);
 	free(manifest_head_latest);
 	free(manifest_head_old);
+	free(manifest_branch_old);
 	return EXIT_SUCCESS;
 
 frepo_sync_failed:
+	if (manifest_branch_old)
+		git_checkout("manifest", manifest_branch_old);
 	if (manifest_head_old)
 		git_reset_hard("manifest", manifest_head_old);
 	manifest_delete(manifest_updated);
@@ -390,6 +404,7 @@ frepo_sync_failed:
 	manifest_delete(manifest_unchanged);
 	free(manifest_head_latest);
 	free(manifest_head_old);
+	free(manifest_branch_old);
 	return EXIT_FAILURE;
 }
 
@@ -570,7 +585,8 @@ int main(int argc, char* argv[])
 					repo = argv[++a];
 					break;
 				case 'b':
-					if (command != frepo_command_init)
+					if ((command != frepo_command_init)
+						&& (command != frepo_command_sync))
 					{
 						fprintf(stderr,
 							"Error: -b flag invalid for command.\n");
@@ -693,7 +709,7 @@ int main(int argc, char* argv[])
 			ret = frepo_init(manifest, mirror);
 			break;
 		case frepo_command_sync:
-			ret = frepo_sync(manifest, manifest_path, force);
+			ret = frepo_sync(manifest, manifest_path, force, branch);
 			break;
 		case frepo_command_forall:
 			ret = frepo_forall(manifest, fa_argc, fa_argv, print);
