@@ -27,9 +27,10 @@ bool git_clone(
 		+ (remote_name ? strlen(remote_name) + 10 : 0)
 		+ (branch ? strlen(branch) + 4 : 0) + 64];
 
+	bool checkout_revision = false;
 	if (branch)
 	{
-		sprintf(cmd, "git ls-remote --exit-code %s", repo);
+		sprintf(cmd, "git ls-remote --heads --exit-code %s", repo);
 
 		if (path)
 		{
@@ -40,8 +41,7 @@ bool git_clone(
 		strcat(cmd, " ");
 		strcat(cmd, branch);
 
-		if (system(cmd) != EXIT_SUCCESS)
-			return false;
+		checkout_revision = (system(cmd) != EXIT_SUCCESS);
 	}
 
 	sprintf(cmd, "git clone %s", repo);
@@ -52,7 +52,7 @@ bool git_clone(
 		strcat(cmd, path);
 	}
 
-	if (branch)
+	if (branch && !checkout_revision)
 	{
 		strcat(cmd, " -b ");
 		strcat(cmd, branch);
@@ -73,7 +73,12 @@ bool git_clone(
 	if (mirror)
 		strcat(cmd, " --mirror");
 
-	return (system(cmd) == EXIT_SUCCESS);
+	if (system(cmd) != EXIT_SUCCESS)
+		return false;
+
+	if (checkout_revision)
+		return git_checkout(target, branch, false);
+	return true;
 }
 
 
