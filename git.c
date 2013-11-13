@@ -163,7 +163,13 @@ bool git_uncomitted_changes(const char* path, bool* changed)
 	if (chdir(path) != 0)
 		return false;
 
-	*changed = (system("git diff --exit-code") != 0);
+	bool unstaged
+		= (system("git diff --quiet --exit-code") != EXIT_SUCCESS);
+	bool uncommitted
+		= (system("git diff --cached --quiet --exit-code") != EXIT_SUCCESS);
+
+	*changed = (unstaged || uncommitted);
+
 	assert(chdir(pdir) == 0);
 	return true;
 }
