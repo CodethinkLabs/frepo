@@ -470,6 +470,8 @@ frepo_snapshot_failed:
 	if (!git_checkout("manifest", branch, false))
 		fprintf(stderr, "Warning: Failed to revert manifest"
 			" to previous branch '%s'.\n", branch);
+	else if (!git_reset_hard("manifest", "HEAD"))
+		fprintf(stderr, "Warning: Failed to reset manifest to HEAD.\n");
 	free(branch);
 	return EXIT_FAILURE;
 }
