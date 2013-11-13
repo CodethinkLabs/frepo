@@ -125,7 +125,7 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 	if (branch)
 	{
 		manifest_branch_old = git_current_branch("manifest");
-		if (!git_checkout("manifest", branch))
+		if (!git_checkout("manifest", branch, false))
 		{
 			fprintf(stderr, "Error: Failed to checkout manifest branch.\n");
 			goto frepo_sync_failed;
@@ -315,7 +315,7 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 				= (strcmp(revision, manifest_unchanged->project[i].revision) != 0);
 			if (revision_differs && !git_checkout(
 				manifest_unchanged->project[i].path,
-				manifest_unchanged->project[i].revision))
+				manifest_unchanged->project[i].revision, false))
 			{
 				free(revision);
 				fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
@@ -357,7 +357,7 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 
 			if (revision_differs && !git_checkout(
 				manifest_unchanged->project[i].path,
-				manifest_unchanged->project[i].revision))
+				manifest_unchanged->project[i].revision, false))
 			{
 				fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
 					manifest_unchanged->project[i].path, revision);
@@ -395,7 +395,7 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 
 frepo_sync_failed:
 	if (manifest_branch_old)
-		git_checkout("manifest", manifest_branch_old);
+		git_checkout("manifest", manifest_branch_old, false);
 	if (manifest_head_old)
 		git_reset_hard("manifest", manifest_head_old);
 	manifest_delete(manifest_updated);

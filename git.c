@@ -122,13 +122,16 @@ bool git_remove(const char* path)
 	return (system(cmd) == 0);
 }
 
-bool git_checkout(const char* path, const char* revision)
+bool git_checkout(const char* path, const char* revision, bool create)
 {
 	if (!path || !revision)
 		return false;
 
 	char cmd[strlen(revision) + 64];
-	sprintf(cmd, "git checkout %s", revision);
+	strcpy(cmd, "git checkout ");
+	if (create)
+		strcat(cmd, "-b ");
+	strcat(cmd, revision);
 	return git__command(path, cmd);
 }
 
