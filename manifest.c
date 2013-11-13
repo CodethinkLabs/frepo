@@ -1,4 +1,5 @@
 #include "manifest.h"
+#include "git.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -412,4 +413,77 @@ manifest_t* manifest_subtract(manifest_t* a, manifest_t* b)
 	}
 
 	return manifest;
+}
+
+
+
+bool manifest_write_snapshot(manifest_t* manifest, const char* path)
+{
+	if (!manifest)
+		return false;
+
+	FILE* fp = fopen(path, "w");
+	if (!fp)
+	{
+		fprintf(stderr, "Error: Failed to open '%s'"
+			" to write manifest snapshot.\n", path);
+		return false;
+	}
+
+	fprintf(fp, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+	fprintf(fp, "<manifest>\n");
+
+	unsigned i;
+	for (i = 0; i < manifest->remote_count; i++)
+	{
+		remote_t* remote = &manifest->remote[i];
+
+		fprintf(fp, "\t<remote name=\"%s\" fetch=\"%s\"/>\n",
+			remote->name, remote->fetch);
+	}
+
+	for (i = 0; i < manifest->project_count; i++)
+	{
+		project_t* project = &manifest->project[i];
+
+		char* revision
+			= git_current_commit(project->path);
+		if (!revision)
+		{
+			fprintf(stderr, "Error: Failed to get current revision"
+				" during snapshot.\n");
+			fclose(fp);
+			return false;
+		}
+
+		fprintf(fp, "\t<project path=\"%s\" name=\"%s\""
+			" revision=\"%s\" remote=\"%s\"",
+			project->path, project->name,
+			revision, project->remote_name);
+
+		free(revision);
+
+		if (project->copyfile_count)
+		{
+			fprintf(fp, ">\n");
+
+			unsigned j;
+			for (j = 0; j < project->copyfile_count; j++)
+			{
+				fprintf(fp, "\t\t<copyfile src=\"%s\" dest=\"%s\"/>\n",
+					project->copyfile[j].source, project->copyfile[j].dest);
+			}
+
+			fprintf(fp, "\t</project>\n");
+		}
+		else
+		{
+			fprintf(fp, "/>\n");
+		}
+	}
+
+	fprintf(fp, "</manifest>\n");
+	bool err = ferror(fp);
+	fclose(fp);
+	return !err;
 }

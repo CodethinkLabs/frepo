@@ -2,6 +2,7 @@
 #define __manifest_h__
 
 #include "xml.h"
+#include <stdbool.h>
 
 typedef struct
 {
@@ -43,5 +44,7 @@ extern manifest_t* manifest_read(const char* path);
 
 extern manifest_t* manifest_copy(manifest_t* a);
 extern manifest_t* manifest_subtract(manifest_t* a, manifest_t* b);
+
+extern bool manifest_write_snapshot(manifest_t* manifest, const char* path);
 
 #endif
