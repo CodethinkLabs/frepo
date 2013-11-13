@@ -5,6 +5,12 @@
 
 typedef struct
 {
+	const char* name;
+	const char* fetch;
+} remote_t;
+
+typedef struct
+{
 	const char* source;
 	const char* dest;
 } copyfile_t;
@@ -22,6 +28,8 @@ typedef struct
 
 typedef struct
 {
+	remote_t*  remote;
+	unsigned   remote_count;
 	project_t* project;
 	unsigned   project_count;
 	xml_tag_t* document;

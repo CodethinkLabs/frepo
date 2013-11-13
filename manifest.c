@@ -57,23 +57,39 @@ manifest_t* manifest_parse(xml_tag_t* document)
 		}
 	}
 
-	xml_tag_t* remote[remote_count];
+	manifest_t* manifest = (manifest_t*)malloc(
+		sizeof(manifest_t)
+		+ (remote_count * sizeof(remote_t))
+		+ (project_count * sizeof(project_t)));
+	if (!manifest) return NULL;
+	manifest->remote_count = remote_count;
+	manifest->remote  = (remote_t*)((uintptr_t)manifest + sizeof(manifest_t));
+	manifest->project_count = project_count;
+	manifest->project = (project_t*)&manifest->remote[manifest->remote_count];
+	manifest->document = NULL;
 
 	unsigned j;
 	for (i = 0, j = 0; i < mdoc->tag_count; i++)
 	{
 		if (strcmp(mdoc->tag[i]->name, "remote") == 0)
-			remote[j++] = mdoc->tag[i];
+		{
+			manifest->remote[j].name
+				= xml_tag_field(mdoc->tag[i], "name");
+			manifest->remote[j].fetch
+				= xml_tag_field(mdoc->tag[i], "fetch");
+			if (!manifest->remote[j].name
+				|| !manifest->remote[j].fetch)
+			{
+				fprintf(stderr,
+					"Error: Missing 'name' or 'fetch' field in remote tag.\n");
+				free(manifest);
+				return NULL;
+			}
+		}
 	}
 
-	manifest_t* manifest = (manifest_t*)malloc(
-		sizeof(manifest_t) + (project_count * sizeof(project_t)));
-	if (!manifest) return NULL;
-	manifest->project_count = project_count;
-	manifest->project = (project_t*)((uintptr_t)manifest + sizeof(manifest_t));
-	manifest->document = NULL;
-
-	xml_tag_t*  default_remote   = (remote_count ? remote[0] : NULL);
+	remote_t*   default_remote
+		= (manifest->remote_count > 0 ? &manifest->remote[0] : NULL);
 	const char* default_revision = NULL;
 
 	for (i = 0, j = 0; i < mdoc->tag_count; i++)
@@ -92,15 +108,14 @@ manifest_t* manifest_parse(xml_tag_t* document)
 				unsigned r;
 				for (r = 0; r < remote_count; r++)
 				{
-					const char* rname
-						= xml_tag_field(remote[r], "name");
+					const char* rname = manifest->remote[r].name;
 					if (rname && (strcmp(rname, nremote) == 0))
 					{
-						default_remote = remote[r];
+						default_remote = &manifest->remote[r];
 						break;
 					}
 				}
-				if (r >= remote_count)
+				if (r >= manifest->remote_count)
 				{
 					fprintf(stderr,
 						"Error: Invalid remote name '%s' in default tag.\n",
@@ -126,15 +141,12 @@ manifest_t* manifest_parse(xml_tag_t* document)
 				unsigned r;
 				for (r = 0; r < remote_count; r++)
 				{
-					const char* rname
-						= xml_tag_field(remote[r], "name");
+					const char* rname = manifest->remote[r].name;
 					if (rname
 						&& (strcmp(rname, project->remote) == 0))
 					{
-						project->remote
-							= xml_tag_field(remote[r], "fetch");
-						project->remote_name
-							= xml_tag_field(remote[r], "name");
+						project->remote      = manifest->remote[r].fetch;
+						project->remote_name = manifest->remote[r].name;
 						break;
 					}
 				}
@@ -149,10 +161,8 @@ manifest_t* manifest_parse(xml_tag_t* document)
 			}
 			else
 			{
-				project->remote
-					= xml_tag_field(default_remote, "fetch");
-				project->remote_name
-					= xml_tag_field(default_remote, "name");
+				project->remote      = default_remote->fetch;
+				project->remote_name = default_remote->name;
 			}
 
 			project->revision
@@ -283,12 +293,20 @@ manifest_t* manifest_copy(manifest_t* a)
 	if (!a) return NULL;
 
 	manifest_t* manifest = (manifest_t*)malloc(
-		sizeof(manifest_t) + (a->project_count * sizeof(project_t)));
+		sizeof(manifest_t)
+		+ (a->remote_count * sizeof(remote_t))
+		+ (a->project_count * sizeof(project_t)));
 	if (!manifest) return NULL;
+	manifest->remote_count = a->remote_count;
+	manifest->remote  = (remote_t*)((uintptr_t)manifest + sizeof(manifest_t));
 	manifest->project_count = a->project_count;
-	manifest->project = (project_t*)((uintptr_t)manifest + sizeof(manifest_t));
+	manifest->project = (project_t*)&manifest->remote[manifest->remote_count];
+	manifest->document = NULL;
 
 	unsigned i;
+	for (i = 0; i < a->remote_count; i++)
+		manifest->remote[i] = a->remote[i];
+
 	for (i = 0; i < a->project_count; i++)
 	{
 		manifest->project[i] = a->project[i];
@@ -343,10 +361,18 @@ manifest_t* manifest_subtract(manifest_t* a, manifest_t* b)
 		return NULL;
 
 	manifest_t* manifest = (manifest_t*)malloc(
-		sizeof(manifest_t) + (project_count * sizeof(project_t)));
+		sizeof(manifest_t)
+		+ (a->remote_count * sizeof(remote_t))
+		+ (project_count * sizeof(project_t)));
 	if (!manifest) return NULL;
+	manifest->remote_count = a->remote_count;
+	manifest->remote  = (remote_t*)((uintptr_t)manifest + sizeof(manifest_t));
 	manifest->project_count = project_count;
-	manifest->project = (project_t*)((uintptr_t)manifest + sizeof(manifest_t));
+	manifest->project = (project_t*)&manifest->remote[manifest->remote_count];
+	manifest->document = NULL;
+
+	for (i = 0; i < a->remote_count; i++)
+		manifest->remote[i] = a->remote[i];
 
 	unsigned k;
 	for (i = 0, k = 0; i < a->project_count; i++)
