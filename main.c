@@ -17,6 +17,7 @@ typedef enum
 {
 	frepo_command_init,
 	frepo_command_sync,
+	frepo_command_snapshot,
 	frepo_command_list,
 	frepo_command_forall,
 	frepo_command_count
@@ -28,6 +29,7 @@ void print_usage(const char* prog)
 {
 	printf("%s init name -u manifest [-b branch] [--mirror]\n", prog);
 	printf("%s sync [-f] [-b branch]\n", prog);
+	printf("%s snapshot name\n", prog);
 	printf("%s list\n", prog);
 	printf("%s forall [-p] -c command\n", prog);
 }
@@ -408,6 +410,57 @@ frepo_sync_failed:
 	return EXIT_FAILURE;
 }
 
+static int frepo_snapshot(manifest_t* manifest, const char* manifest_path, const char* name)
+{
+	char* branch = git_current_branch("manifest");
+	if (!branch)
+		branch = git_current_commit("manifest");
+
+	if (!branch)
+	{
+		fprintf(stderr, "Error: Failed get current HEAD.\n");
+		return EXIT_FAILURE;
+	}
+
+	if (!git_checkout("manifest", name, true))
+	{
+		free(branch);
+		fprintf(stderr, "Error: Failed to checkout snapshot branch '%s'.\n", name);
+		return EXIT_FAILURE;
+	}
+
+	char snapshot_message[64 + strlen(name)];
+	sprintf(snapshot_message, "Manifest snapshot '%s'", name);
+
+	if (!manifest_write_snapshot(manifest, manifest_path))
+	{
+		fprintf(stderr, "Error: Failed to snapshot manifest.\n");
+		goto frepo_snapshot_failed;
+	}
+
+	if (!git_commit("manifest", snapshot_message))
+	{
+		fprintf(stderr, "Error: Failed to commit snapshot, reverting.\n");
+		if (!git_reset_hard("manifest", "HEAD"))
+			fprintf(stderr, "Warning: Failed to reset uncommitted snapshot.\n");
+		goto frepo_snapshot_failed;
+	}
+
+	if (!git_checkout("manifest", branch, false))
+		fprintf(stderr, "Warning: Failed to revert manifest"
+			" to previous branch '%s'.\n", branch);
+	free(branch);
+
+	return EXIT_SUCCESS;
+
+frepo_snapshot_failed:
+	if (!git_checkout("manifest", branch, false))
+		fprintf(stderr, "Warning: Failed to revert manifest"
+			" to previous branch '%s'.\n", branch);
+	free(branch);
+	return EXIT_FAILURE;
+}
+
 static int frepo_list(manifest_t* manifest)
 {
 	unsigned i;
@@ -512,6 +565,8 @@ int main(int argc, char* argv[])
 		command = frepo_command_init;
 	else if (strcmp(argv[1], "sync") == 0)
 		command = frepo_command_sync;
+	else if (strcmp(argv[1], "snapshot") == 0)
+		command = frepo_command_snapshot;
 	else if (strcmp(argv[1], "list") == 0)
 		command = frepo_command_list;
 	else if (strcmp(argv[1], "forall") == 0)
@@ -534,7 +589,8 @@ int main(int argc, char* argv[])
 	char** fa_argv = NULL;
 
 	int a = 2;
-	if (command == frepo_command_init)
+	if ((command == frepo_command_init)
+		|| (command == frepo_command_snapshot))
 	{
 		if (argc < 3)
 		{
@@ -710,6 +766,9 @@ int main(int argc, char* argv[])
 			break;
 		case frepo_command_sync:
 			ret = frepo_sync(manifest, manifest_path, force, branch);
+			break;
+		case frepo_command_snapshot:
+			ret = frepo_snapshot(manifest, manifest_path, name);
 			break;
 		case frepo_command_forall:
 			ret = frepo_forall(manifest, fa_argc, fa_argv, print);
