@@ -412,6 +412,19 @@ frepo_sync_failed:
 
 static int frepo_snapshot(manifest_t* manifest, const char* manifest_path, const char* name)
 {
+	bool changes;
+	if (!git_uncomitted_changes("manifest", &changes))
+	{
+		fprintf(stderr, "Error: Failed to check for uncommitted changes to manifest.\n");
+		return EXIT_FAILURE;
+	}
+
+	if (changes)
+	{
+		fprintf(stderr, "Error: Can't snapshot a manifest repository with uncommitted changes.\n");
+		return EXIT_FAILURE;
+	}
+
 	char* branch = git_current_branch("manifest");
 	if (!branch)
 		branch = git_current_commit("manifest");
