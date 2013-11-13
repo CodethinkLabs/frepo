@@ -135,6 +135,16 @@ bool git_checkout(const char* path, const char* revision, bool create)
 	return git__command(path, cmd);
 }
 
+bool git_commit(const char* path, const char* message)
+{
+	if (!message)
+		return false;
+
+	char cmd[strlen(message) + 64];
+	sprintf(cmd, "git commit -a -m \"%s\"", message);
+	return git__command(path, cmd);
+}
+
 
 
 bool git_uncomitted_changes(const char* path, bool* changed)
