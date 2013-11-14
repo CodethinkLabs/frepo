@@ -83,7 +83,7 @@ bool git_clone(
 
 
 
-bool git__command(const char* path, const char* command)
+static bool git__command(const char* path, const char* command)
 {
 	if (!path || !command)
 		return false;
@@ -94,7 +94,7 @@ bool git__command(const char* path, const char* command)
 	if (chdir(path) != 0)
 		return false;
 
-	bool ret = (system(command) == 0);
+	bool ret = (system(command) == EXIT_SUCCESS);
 	assert(chdir(pdir) == 0);
 	return ret;
 }
@@ -109,9 +109,16 @@ bool git_reset_hard(const char* path, const char* commit)
 	return git__command(path, cmd);
 }
 
-bool git_fetch(const char* path)
+bool git_fetch(const char* path, const char* remote)
 {
-	return git__command(path, "git fetch");
+	char cmd[(remote ? strlen(remote) : 0) + 64];
+	strcpy(cmd, "git fetch");
+	if (remote)
+	{
+		strcat(cmd, " ");
+		strcat(cmd, remote);
+	}
+	return git__command(path, cmd);
 }
 
 bool git_pull(const char* path)
@@ -150,6 +157,35 @@ bool git_commit(const char* path, const char* message)
 	return git__command(path, cmd);
 }
 
+bool git_update(const char* path, const char* revision, const char* remote)
+{
+	if (!path || !revision)
+		return false;
+
+	if (!git_fetch(path, remote))
+		return false;
+
+	bool is_branch;
+	if (!git_revision_is_branch(path, revision, &is_branch))
+		return false;
+
+	return (is_branch
+		? git_pull(path)
+		: git_checkout(path, revision, false));
+}
+
+
+
+bool git_revision_is_branch(const char* path, const char* revision, bool* is_branch)
+{
+	if (!path || !revision || !is_branch)
+		return false;
+
+	char cmd[strlen(revision) + 64];
+	sprintf(cmd, "git ls-remote --heads --exit-code . %s", revision);
+	*is_branch = git__command(path, cmd);
+	return true;
+}
 
 
 bool git_uncomitted_changes(const char* path, bool* changed)
@@ -227,6 +263,12 @@ char* git_current_branch(const char* path)
 
 	char* branch
 		= git__pipe_read("git rev-parse --symbolic-full-name --abbrev-ref HEAD");
+	if (branch && (strcmp(branch, "HEAD") == 0))
+	{
+		free(branch);
+		branch = git__pipe_read("git rev-parse HEAD");
+	}
+
 	assert(chdir(pdir) == 0);
 	return branch;
 }

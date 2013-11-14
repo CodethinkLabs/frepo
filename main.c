@@ -85,6 +85,7 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 
 static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool force, const char* branch)
 {
+	char* manifest_branch = NULL;
 	char* manifest_branch_old = NULL;
 	char* manifest_head_old = NULL;
 	char* manifest_head_latest = NULL;
@@ -124,18 +125,19 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 
 	printf("Updating manifest.\n");
 
+	manifest_branch = git_current_branch("manifest");
 	if (branch)
 	{
-		manifest_branch_old = git_current_branch("manifest");
+		manifest_branch_old = manifest_branch;
 		if (!git_checkout("manifest", branch, false))
 		{
 			fprintf(stderr, "Error: Failed to checkout manifest branch.\n");
 			goto frepo_sync_failed;
 		}
+		manifest_branch = (char*)branch;
 	}
 
-	if (!git_fetch("manifest")
-		|| !git_pull("manifest"))
+	if (!git_update("manifest", manifest_branch, NULL))
 	{
 		fprintf(stderr, "Error: Failed to update manifest.\n");
 		goto frepo_sync_failed;
@@ -326,8 +328,10 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 				continue;
 			}
 
-			if (!git_fetch(manifest_unchanged->project[i].path)
-				|| !git_pull(manifest_unchanged->project[i].path))
+			if (!git_update(
+				manifest_unchanged->project[i].path,
+				manifest_unchanged->project[i].revision,
+				manifest_unchanged->project[i].remote_name))
 			{
 				fprintf(stderr, "Error: Failed to update '%s'.\n",
 					manifest_unchanged->project[i].path);
@@ -393,6 +397,8 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 	free(manifest_head_latest);
 	free(manifest_head_old);
 	free(manifest_branch_old);
+	if (manifest_branch != branch)
+		free(manifest_branch);
 	return EXIT_SUCCESS;
 
 frepo_sync_failed:
@@ -407,6 +413,8 @@ frepo_sync_failed:
 	free(manifest_head_latest);
 	free(manifest_head_old);
 	free(manifest_branch_old);
+	if (manifest_branch != branch)
+		free(manifest_branch);
 	return EXIT_FAILURE;
 }
 
