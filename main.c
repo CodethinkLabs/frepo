@@ -91,8 +91,6 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 	char* manifest_head_latest = NULL;
 	manifest_t* manifest_updated = NULL;
 	manifest_t* manifest_old = NULL;
-	manifest_t* manifest_new = NULL;
-	manifest_t* manifest_unchanged = NULL;
 
 	char pdir[PATH_MAX];
 	if (getcwd(pdir, PATH_MAX) != pdir)
@@ -202,39 +200,31 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 				}
 			}
 		}
-
-		manifest_new = manifest_subtract(
-			manifest_updated, manifest);
-
-		manifest_unchanged = manifest_subtract(
-			manifest_updated, manifest_new);
-		if (!manifest_unchanged)
-		{
-			fprintf(stderr, "Error: Failed to read new manifest.\n");
-			goto frepo_sync_failed;
-		}
 	}
 	else
 	{
-		manifest_unchanged = manifest_copy(manifest);
+		manifest_updated = manifest_copy(manifest);
 	}
 
-	if (manifest_unchanged)
+	if (manifest_updated)
 	{
 		unsigned i;
-		for (i = 0; i < manifest_unchanged->project_count; i++)
+		for (i = 0; i < manifest_updated->project_count; i++)
 		{
 			printf("Checking for uncommitted changes in '%s' (%u/%u).\n",
-				manifest_unchanged->project[i].path,
-				(i + 1), manifest_unchanged->project_count);
+				manifest_updated->project[i].path,
+				(i + 1), manifest_updated->project_count);
+
+			if (!git_exists(manifest_updated->project[i].path))
+				continue;
 
 			bool uncommitted_changes;
 			if (!git_uncomitted_changes(
-				manifest_unchanged->project[i].path, &uncommitted_changes))
+				manifest_updated->project[i].path, &uncommitted_changes))
 			{
 				fprintf(stderr, "Error: '%s' is deprecated but can't remove"
 					" because checking for uncommitted changes failed.\n",
-					manifest_unchanged->project[i].name);
+					manifest_updated->project[i].name);
 				goto frepo_sync_failed;
 			}
 			else if (uncommitted_changes)
@@ -247,130 +237,78 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 		}
 	}
 
-	if (manifest_new)
+	if (manifest_updated)
 	{
 		unsigned i;
-		for (i = 0; i < manifest_new->project_count; i++)
-		{
-			printf("Cloning new repository (%u/%u) '%s'.\n",
-				(i + 1), manifest_new->project_count,
-				manifest_new->project[i].path);
-
-			if (!git_update(
-				manifest_new->project[i].path,
-				manifest_new->project[i].remote,
-				manifest_new->project[i].name,
-				manifest_new->project[i].remote_name,
-				manifest_new->project[i].revision,
-				false))
-			{
-				unsigned k;
-				for (k = 0; k < i; k++)
-					git_remove(manifest_new->project[k].path);
-				fprintf(stderr, "Error: Failed to pull new repository '%s'.\n",
-					manifest_new->project[i].path);
-				goto frepo_sync_failed;
-			}
-
-			unsigned j;
-			for (j = 0; j < manifest_new->project[i].copyfile_count; j++)
-			{
-				char cmd[strlen(manifest_new->project[i].path)
-					+ strlen(manifest_new->project[i].copyfile[j].source)
-					+ strlen(manifest_new->project[i].copyfile[j].dest) + 16];
-				sprintf(cmd, "cp %s/%s %s",
-					manifest_new->project[i].path,
-					manifest_new->project[i].copyfile[j].source,
-					manifest_new->project[i].copyfile[j].dest);
-				if (system(cmd) != EXIT_SUCCESS)
-				{
-					unsigned k;
-					for (k = 0; k < i; k++)
-						git_remove(manifest_new->project[k].path);
-					fprintf(stderr,
-						"Error: Failed to perform copy '%s' to '%s'"
-						" for project '%s'\n",
-						manifest_new->project[i].copyfile[j].source,
-						manifest_new->project[i].copyfile[j].dest,
-						manifest_new->project[i].path);
-					goto frepo_sync_failed;
-				}
-			}
-		}
-	}
-
-	if (manifest_unchanged)
-	{
-		unsigned i;
-		for (i = 0; i < manifest_unchanged->project_count; i++)
+		for (i = 0; i < manifest_updated->project_count; i++)
 		{
 			printf("Updating existing repository (%u/%u) '%s'.\n",
-				(i + 1), manifest_unchanged->project_count,
-				manifest_unchanged->project[i].path);
+				(i + 1), manifest_updated->project_count,
+				manifest_updated->project[i].path);
 
 			char* revision = git_current_branch(
-				manifest_unchanged->project[i].path);
+				manifest_updated->project[i].path);
 			if (!revision)
 			{
 				fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
-					manifest_unchanged->project[i].path);
+					manifest_updated->project[i].path);
 				continue;
 			}
 
 			bool revision_differs
-				= (strcmp(revision, manifest_unchanged->project[i].revision) != 0);
+				= (strcmp(revision, manifest_updated->project[i].revision) != 0);
 			if (revision_differs && !git_checkout(
-				manifest_unchanged->project[i].path,
-				manifest_unchanged->project[i].revision, false))
+				manifest_updated->project[i].path,
+				manifest_updated->project[i].revision, false))
 			{
 				free(revision);
 				fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
-					manifest_unchanged->project[i].revision,
-					manifest_unchanged->project[i].path);
+					manifest_updated->project[i].revision,
+					manifest_updated->project[i].path);
 				continue;
 			}
 
 			if (!git_update(
-				manifest_unchanged->project[i].path,
-				manifest_unchanged->project[i].remote,
-				manifest_unchanged->project[i].name,
-				manifest_unchanged->project[i].remote_name,
-				manifest_unchanged->project[i].revision, false))
+				manifest_updated->project[i].path,
+				manifest_updated->project[i].remote,
+				manifest_updated->project[i].name,
+				manifest_updated->project[i].remote_name,
+				manifest_updated->project[i].revision, false))
 			{
 				fprintf(stderr, "Error: Failed to update '%s'.\n",
-					manifest_unchanged->project[i].path);
+					manifest_updated->project[i].path);
 			}
 
 			unsigned j;
-			for (j = 0; j < manifest_unchanged->project[i].copyfile_count; j++)
+			for (j = 0; j < manifest_updated->project[i].copyfile_count; j++)
 			{
-				char cmd[strlen(manifest_unchanged->project[i].path)
-					+ strlen(manifest_unchanged->project[i].copyfile[j].source)
-					+ strlen(manifest_unchanged->project[i].copyfile[j].dest) + 16];
+				char cmd[strlen(manifest_updated->project[i].path)
+					+ strlen(manifest_updated->project[i].copyfile[j].source)
+					+ strlen(manifest_updated->project[i].copyfile[j].dest) + 16];
 				sprintf(cmd, "cp %s/%s %s",
-					manifest_unchanged->project[i].path,
-					manifest_unchanged->project[i].copyfile[j].source,
-					manifest_unchanged->project[i].copyfile[j].dest);
+					manifest_updated->project[i].path,
+					manifest_updated->project[i].copyfile[j].source,
+					manifest_updated->project[i].copyfile[j].dest);
 				if (system(cmd) != EXIT_SUCCESS)
 				{
 					unsigned k;
 					for (k = 0; k < i; k++)
-						git_remove(manifest_unchanged->project[k].path);
+						git_remove(manifest_updated->project[k].path);
 					fprintf(stderr,
 						"Error: Failed to perform copy '%s' to '%s'"
 						" for project '%s'\n",
-						manifest_unchanged->project[i].copyfile[j].source,
-						manifest_unchanged->project[i].copyfile[j].dest,
-						manifest_unchanged->project[i].path);
+						manifest_updated->project[i].copyfile[j].source,
+						manifest_updated->project[i].copyfile[j].dest,
+						manifest_updated->project[i].path);
 				}
 			}
 
 			if (revision_differs && !git_checkout(
-				manifest_unchanged->project[i].path,
-				manifest_unchanged->project[i].revision, false))
+				manifest_updated->project[i].path,
+				manifest_updated->project[i].revision, false))
 			{
 				fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
-					manifest_unchanged->project[i].path, revision);
+					manifest_updated->project[i].path, revision);
 			}
 
 			free(revision);
@@ -396,8 +334,6 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 
 	manifest_delete(manifest_updated);
 	manifest_delete(manifest_old);
-	manifest_delete(manifest_new);
-	manifest_delete(manifest_unchanged);
 	free(manifest_head_latest);
 	free(manifest_head_old);
 	free(manifest_branch_old);
@@ -412,8 +348,6 @@ frepo_sync_failed:
 		git_reset_hard("manifest", manifest_head_old);
 	manifest_delete(manifest_updated);
 	manifest_delete(manifest_old);
-	manifest_delete(manifest_new);
-	manifest_delete(manifest_unchanged);
 	free(manifest_head_latest);
 	free(manifest_head_old);
 	free(manifest_branch_old);
