@@ -700,9 +700,23 @@ int main(int argc, char* argv[])
 
 	if (system("[ -d manifest ]") != EXIT_SUCCESS)
 	{
-		fprintf(stderr, "Error: Not in a frepo repository"
-			", no manifest directory found.\n");
-		return EXIT_FAILURE;
+		do
+		{
+			char curdir[PATH_MAX];
+			if ((getcwd(curdir, PATH_MAX) != curdir)
+				|| (strcmp(curdir, "/") == 0)
+				|| (chdir("..") != EXIT_SUCCESS)
+				|| (system("[ -d .frepo ]") == EXIT_SUCCESS))
+				break;
+		} while (true);
+
+		if ((system("[ -d .frepo ]") != EXIT_SUCCESS)
+			&& (system("[ -d manifest ]") != EXIT_SUCCESS))
+		{
+			fprintf(stderr, "Error: Not in a frepo repository"
+				", no manifest directory found.\n");
+			return EXIT_FAILURE;
+		}
 	}
 
 	if (system("[ -d .frepo ]") != EXIT_SUCCESS)
