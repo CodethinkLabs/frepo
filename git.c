@@ -167,6 +167,14 @@ bool git_remove(const char* path)
 	return (system(cmd) == 0);
 }
 
+bool git_exists(const char* path)
+{
+	if (!path) return false;
+	char cmd[strlen(path) + 64];
+	sprintf(cmd, "[ -d %s/.git ]", path);
+	return (system(cmd) == EXIT_SUCCESS);
+}
+
 bool git_checkout(const char* path, const char* revision, bool create)
 {
 	if (!path || !revision)
