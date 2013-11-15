@@ -4,8 +4,8 @@
 #include <stdbool.h>
 
 extern bool git_clone(
-	const char* repo, const char* path,
-	const char* target, const char* remote_name,
+	const char* path,
+	const char* remote, const char* remote_path, const char* remote_name,
 	const char* branch, bool mirror);
 
 extern bool git_reset_hard(const char* path, const char* commit);

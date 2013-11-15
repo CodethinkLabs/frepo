@@ -46,9 +46,9 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 			manifest->project[i].path);
 
 		if (!git_clone(
+			manifest->project[i].path,
 			manifest->project[i].remote,
 			manifest->project[i].name,
-			manifest->project[i].path,
 			manifest->project[i].remote_name,
 			manifest->project[i].revision,
 			mirror))
@@ -255,9 +255,9 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 				manifest_new->project[i].path);
 
 			if (!git_clone(
+				manifest_new->project[i].path,
 				manifest_new->project[i].remote,
 				manifest_new->project[i].name,
-				manifest_new->project[i].path,
 				manifest_new->project[i].remote_name,
 				manifest_new->project[i].revision,
 				false))
@@ -764,7 +764,7 @@ int main(int argc, char* argv[])
 			return EXIT_FAILURE;
 		}
 
-		if (!git_clone(repo, NULL, NULL, NULL, branch, false))
+		if (!git_clone(NULL, repo, NULL, NULL, branch, false))
 		{
 			fprintf(stderr, "Error: Failed to clone manifest repository.\n");
 			return EXIT_FAILURE;

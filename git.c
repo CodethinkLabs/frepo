@@ -14,28 +14,28 @@
 
 
 bool git_clone(
-	const char* repo, const char* path,
-	const char* target, const char* remote_name,
+	const char* path,
+	const char* remote, const char* remote_path, const char* remote_name,
 	const char* branch, bool mirror)
 {
-	if (!repo)
+	if (!remote)
 		return false;
 
-	char cmd[strlen(repo)
-		+ (path ? strlen(path) + 1 : 0)
-		+ (target ? strlen(target) + 1 : 0)
+	char cmd[strlen(remote)
+		+ (remote_path ? strlen(remote_path) + 1 : 0)
 		+ (remote_name ? strlen(remote_name) + 10 : 0)
+		+ (path ? strlen(path) + 1 : 0)
 		+ (branch ? strlen(branch) + 4 : 0) + 64];
 
 	bool checkout_revision = false;
 	if (branch)
 	{
-		sprintf(cmd, "git ls-remote --heads --exit-code %s", repo);
+		sprintf(cmd, "git ls-remote --heads --exit-code %s", remote);
 
-		if (path)
+		if (remote_path)
 		{
 			strcat(cmd, "/");
-			strcat(cmd, path);
+			strcat(cmd, remote_path);
 		}
 
 		strcat(cmd, " ");
@@ -44,12 +44,12 @@ bool git_clone(
 		checkout_revision = (system(cmd) != EXIT_SUCCESS);
 	}
 
-	sprintf(cmd, "git clone %s", repo);
+	sprintf(cmd, "git clone %s", remote);
 
-	if (path)
+	if (remote_path)
 	{
 		strcat(cmd, "/");
-		strcat(cmd, path);
+		strcat(cmd, remote_path);
 	}
 
 	if (branch && !checkout_revision)
@@ -58,10 +58,43 @@ bool git_clone(
 		strcat(cmd, branch);
 	}
 
-	if (target)
+	char auto_path[strlen(remote)
+		+ (remote_path ? strlen(remote_path) + 1 : 0) + 1];
+	if (path)
 	{
 		strcat(cmd, " ");
-		strcat(cmd, target);
+		strcat(cmd, path);
+	}
+	else
+	{
+		strcpy(auto_path, remote);
+		if (remote_path)
+		{
+			strcat(auto_path, "/");
+			strcat(auto_path, remote_path);
+		}
+
+		unsigned pathlen = strlen(auto_path);
+		while ((pathlen > 1)
+			&& (auto_path[pathlen - 1] == '/'))
+			auto_path[--pathlen] = '\0';
+
+		char* npath = auto_path;
+		unsigned i;
+		for (i = 0; i < pathlen; i++)
+		{
+			if (auto_path[i] == '/')
+				npath = &auto_path[i + 1];
+		}
+		pathlen -= i;
+
+		if (!mirror
+			&& (strcmp(&npath[pathlen - 4], ".git") == 0))
+		{
+			pathlen -= 4;
+			npath[pathlen] = '\0';
+		}
+		path = npath;
 	}
 
 	if (remote_name)
@@ -77,7 +110,7 @@ bool git_clone(
 		return false;
 
 	if (checkout_revision)
-		return git_checkout(target, branch, false);
+		return git_checkout(path, branch, false);
 	return true;
 }
 
