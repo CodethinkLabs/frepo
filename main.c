@@ -36,10 +36,10 @@ void print_usage(const char* prog)
 
 
 
-static int frepo_sync_manifest(manifest_t* manifest, bool mirror)
+static bool frepo_sync_manifest(manifest_t* manifest, bool mirror)
 {
 	if (!manifest)
-		return EXIT_FAILURE;
+		return false;
 
 	unsigned i;
 	for (i = 0; i < manifest->project_count; i++)
@@ -125,7 +125,13 @@ static int frepo_sync_manifest(manifest_t* manifest, bool mirror)
 
 		free(revision);
 	}
-	return EXIT_SUCCESS;
+	return true;
+}
+
+static int frepo_init(manifest_t* manifest, bool mirror)
+{
+	return (frepo_sync_manifest(manifest, mirror)
+		? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
 static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool force, const char* branch)
@@ -281,7 +287,7 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 			}
 		}
 
-		if (frepo_sync_manifest(manifest_updated, false) != EXIT_SUCCESS)
+		if (!frepo_sync_manifest(manifest_updated, false))
 			return EXIT_FAILURE;
 	}
 
@@ -672,6 +678,17 @@ int main(int argc, char* argv[])
 			return EXIT_FAILURE;
 		}
 
+		/* TODO - Fix so that relative paths for repositories work with this. */
+
+		if (mkdir(".frepo", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0)
+		{
+			if (errno != EEXIST)
+			{
+				fprintf(stderr, "Error: Failed to create '.frepo' directory.\n", name);
+				return EXIT_FAILURE;
+			}
+		}
+
 		if (!git_update(NULL, repo, NULL, NULL, branch, false))
 		{
 			fprintf(stderr, "Error: Failed to clone manifest repository.\n");
@@ -679,10 +696,47 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	const char* manifest_path = "manifest/default.xml";
+	const char* manifest_path = ".frepo/manifest.xml";
+
+	if (system("[ -d manifest ]") != EXIT_SUCCESS)
+	{
+		fprintf(stderr, "Error: Not in a frepo repository"
+			", no manifest directory found.\n");
+		return EXIT_FAILURE;
+	}
+
+	if (system("[ -d .frepo ]") != EXIT_SUCCESS)
+	{
+		fprintf(stderr, "Warning: No .frepo directory found"
+			", recreating but deletions may not be tracked.\n");
+
+		if (mkdir(".frepo", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0)
+		{
+			if (errno != EEXIST)
+			{
+				fprintf(stderr, "Error: Failed to create '.frepo' directory.\n", name);
+				return EXIT_FAILURE;
+			}
+		}
+
+		char cmd[strlen(manifest_path) + 64];
+		sprintf(cmd, "cp manifest/default.xml %s", manifest_path);
+		if (system(cmd) != EXIT_SUCCESS)
+		{
+			/* Safely ignore output. */
+		}
+	}
 
 	manifest_t* manifest
 		= manifest_read(manifest_path);
+
+	if (!manifest)
+	{
+		fprintf(stderr, "Warning: Failed to read stored manifest"
+			", frepo may fail to track deletions cleanly.\n");
+		manifest = manifest_read("manifest/default.xml");
+	}
+
 	if (!manifest)
 	{
 		fprintf(stderr, "Error: Unable to read manifest file.\n");
@@ -693,7 +747,7 @@ int main(int argc, char* argv[])
 	switch (command)
 	{
 		case frepo_command_init:
-			ret = frepo_sync_manifest(manifest, mirror);
+			ret = frepo_init(manifest, mirror);
 			break;
 		case frepo_command_sync:
 			ret = frepo_sync(manifest, manifest_path, force, branch);
@@ -707,6 +761,17 @@ int main(int argc, char* argv[])
 		default:
 			ret = frepo_list(manifest);
 			break;
+	}
+
+	if ((ret == EXIT_SUCCESS)
+		&& ((command == frepo_command_init)
+			|| (command == frepo_command_sync)))
+	{
+		char cmd[strlen(manifest_path) + 64];
+		sprintf(cmd, "cp manifest/default.xml %s", manifest_path);
+		if (system(cmd) != EXIT_SUCCESS)
+			fprintf(stderr, "Warning: Failed to store current manifest state"
+				", frepo may fail to track deletions cleanly.\n");
 	}
 
 	manifest_delete(manifest);
