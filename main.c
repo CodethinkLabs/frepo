@@ -45,7 +45,7 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 			(i + 1), manifest->project_count,
 			manifest->project[i].path);
 
-		if (!git_clone(
+		if (!git_update(
 			manifest->project[i].path,
 			manifest->project[i].remote,
 			manifest->project[i].name,
@@ -137,7 +137,9 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 		manifest_branch = (char*)branch;
 	}
 
-	if (!git_update("manifest", manifest_branch, NULL))
+	if (!git_update("manifest",
+			NULL, NULL, NULL,
+			manifest_branch, false))
 	{
 		fprintf(stderr, "Error: Failed to update manifest.\n");
 		goto frepo_sync_failed;
@@ -254,7 +256,7 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 				(i + 1), manifest_new->project_count,
 				manifest_new->project[i].path);
 
-			if (!git_clone(
+			if (!git_update(
 				manifest_new->project[i].path,
 				manifest_new->project[i].remote,
 				manifest_new->project[i].name,
@@ -330,8 +332,10 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 
 			if (!git_update(
 				manifest_unchanged->project[i].path,
-				manifest_unchanged->project[i].revision,
-				manifest_unchanged->project[i].remote_name))
+				manifest_unchanged->project[i].remote,
+				manifest_unchanged->project[i].name,
+				manifest_unchanged->project[i].remote_name,
+				manifest_unchanged->project[i].revision, false))
 			{
 				fprintf(stderr, "Error: Failed to update '%s'.\n",
 					manifest_unchanged->project[i].path);
@@ -764,7 +768,7 @@ int main(int argc, char* argv[])
 			return EXIT_FAILURE;
 		}
 
-		if (!git_clone(NULL, repo, NULL, NULL, branch, false))
+		if (!git_update(NULL, repo, NULL, NULL, branch, false))
 		{
 			fprintf(stderr, "Error: Failed to clone manifest repository.\n");
 			return EXIT_FAILURE;

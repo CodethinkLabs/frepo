@@ -13,108 +13,6 @@
 #include <assert.h>
 
 
-bool git_clone(
-	const char* path,
-	const char* remote, const char* remote_path, const char* remote_name,
-	const char* branch, bool mirror)
-{
-	if (!remote)
-		return false;
-
-	char cmd[strlen(remote)
-		+ (remote_path ? strlen(remote_path) + 1 : 0)
-		+ (remote_name ? strlen(remote_name) + 10 : 0)
-		+ (path ? strlen(path) + 1 : 0)
-		+ (branch ? strlen(branch) + 4 : 0) + 64];
-
-	bool checkout_revision = false;
-	if (branch)
-	{
-		sprintf(cmd, "git ls-remote --heads --exit-code %s", remote);
-
-		if (remote_path)
-		{
-			strcat(cmd, "/");
-			strcat(cmd, remote_path);
-		}
-
-		strcat(cmd, " ");
-		strcat(cmd, branch);
-
-		checkout_revision = (system(cmd) != EXIT_SUCCESS);
-	}
-
-	sprintf(cmd, "git clone %s", remote);
-
-	if (remote_path)
-	{
-		strcat(cmd, "/");
-		strcat(cmd, remote_path);
-	}
-
-	if (branch && !checkout_revision)
-	{
-		strcat(cmd, " -b ");
-		strcat(cmd, branch);
-	}
-
-	char auto_path[strlen(remote)
-		+ (remote_path ? strlen(remote_path) + 1 : 0) + 1];
-	if (path)
-	{
-		strcat(cmd, " ");
-		strcat(cmd, path);
-	}
-	else
-	{
-		strcpy(auto_path, remote);
-		if (remote_path)
-		{
-			strcat(auto_path, "/");
-			strcat(auto_path, remote_path);
-		}
-
-		unsigned pathlen = strlen(auto_path);
-		while ((pathlen > 1)
-			&& (auto_path[pathlen - 1] == '/'))
-			auto_path[--pathlen] = '\0';
-
-		char* npath = auto_path;
-		unsigned i;
-		for (i = 0; i < pathlen; i++)
-		{
-			if (auto_path[i] == '/')
-				npath = &auto_path[i + 1];
-		}
-		pathlen -= i;
-
-		if (!mirror
-			&& (strcmp(&npath[pathlen - 4], ".git") == 0))
-		{
-			pathlen -= 4;
-			npath[pathlen] = '\0';
-		}
-		path = npath;
-	}
-
-	if (remote_name)
-	{
-		strcat(cmd, " --origin ");
-		strcat(cmd, remote_name);
-	}
-
-	if (mirror)
-		strcat(cmd, " --mirror");
-
-	if (system(cmd) != EXIT_SUCCESS)
-		return false;
-
-	if (checkout_revision)
-		return git_checkout(path, branch, false);
-	return true;
-}
-
-
 
 static bool git__command(const char* path, const char* command)
 {
@@ -198,21 +96,152 @@ bool git_commit(const char* path, const char* message)
 	return git__command(path, cmd);
 }
 
-bool git_update(const char* path, const char* revision, const char* remote)
+bool git_update(
+	const char* path,
+	const char* remote, const char* remote_path, const char* remote_name,
+	const char* revision, bool mirror)
 {
-	if (!path || !revision)
+	const char* full_path = path;
+	char auto_path[(remote ? strlen(remote) : 0)
+		+ (remote_path ? strlen(remote_path) + 1 : 0) + 1];
+	if (!path)
+	{
+		if (!remote)
+			return NULL;
+
+		strcpy(auto_path, remote);
+		if (remote_path)
+		{
+			strcat(auto_path, "/");
+			strcat(auto_path, remote_path);
+		}
+
+		unsigned pathlen = strlen(auto_path);
+		while ((pathlen > 1)
+			&& (auto_path[pathlen - 1] == '/'))
+			auto_path[--pathlen] = '\0';
+
+		char* npath = auto_path;
+		unsigned i, j;
+		for (i = 0, j = 0; i < pathlen; i++)
+		{
+			if (auto_path[i] == '/')
+			{
+				j = (i + 1);
+				npath = &auto_path[j];
+			}
+		}
+		pathlen -= j;
+
+		if (!mirror
+			&& (strcmp(&npath[pathlen - 4], ".git") == 0))
+		{
+			pathlen -= 4;
+			npath[pathlen] = '\0';
+		}
+		full_path = npath;
+	}
+	if (full_path[0] == '\0')
 		return false;
 
-	if (!git_fetch(path, remote))
+	if (!git_exists(full_path))
+	{
+		if (!remote)
+			return false;
+
+		char cmd[strlen(remote)
+			+ (remote_path ? strlen(remote_path) + 1 : 0)
+			+ (remote_name ? strlen(remote_name) + 10 : 0)
+			+ (path ? strlen(path) + 1 : 0)
+			+ (revision ? strlen(revision) + 4 : 0) + 64];
+
+		bool checkout_revision = false;
+		if (revision)
+		{
+			sprintf(cmd, "git ls-remote --heads --exit-code %s", remote);
+
+			if (remote_path)
+			{
+				strcat(cmd, "/");
+				strcat(cmd, remote_path);
+			}
+
+			strcat(cmd, " ");
+			strcat(cmd, revision);
+
+			checkout_revision = (system(cmd) != EXIT_SUCCESS);
+		}
+
+		sprintf(cmd, "git clone %s", remote);
+
+		if (remote_path)
+		{
+			strcat(cmd, "/");
+			strcat(cmd, remote_path);
+		}
+
+		if (!mirror && revision && !checkout_revision)
+		{
+			strcat(cmd, " -b ");
+			strcat(cmd, revision);
+		}
+
+		char auto_path[strlen(remote)
+			+ (remote_path ? strlen(remote_path) + 1 : 0) + 1];
+		if (path)
+		{
+			strcat(cmd, " ");
+			strcat(cmd, path);
+		}
+
+		if (!mirror && remote_name)
+		{
+			strcat(cmd, " --origin ");
+			strcat(cmd, remote_name);
+		}
+
+		if (mirror)
+			strcat(cmd, " --mirror");
+
+		if (system(cmd) != EXIT_SUCCESS)
+			return false;
+
+		if (mirror || !revision)
+			return true;
+	}
+	else if (mirror)
+		return git__command(full_path, "git remote mirror");
+
+	char* full_revision = (char*)revision;
+	if (!revision)
+	{
+		full_revision = git_current_branch(full_path);
+		if (!full_revision)
+			return false;
+	}
+
+	if (!git_fetch(full_path, remote_name))
+	{
+		if (full_revision != revision)
+			free(full_revision);
 		return false;
+	}
 
 	bool is_branch;
-	if (!git_revision_is_branch(path, revision, &is_branch))
+	if (!git_revision_is_branch(full_path, full_revision, &is_branch))
+	{
+		if (full_revision != revision)
+			free(full_revision);
 		return false;
+	}
 
-	return (is_branch
-		? git_pull(path)
-		: git_checkout(path, revision, false));
+	bool success = (is_branch
+		? git_pull(full_path)
+		: git_checkout(full_path, revision, false));
+
+	if (full_revision != revision)
+		free(full_revision);
+	return success;
 }
 
 
