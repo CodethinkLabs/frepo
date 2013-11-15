@@ -36,26 +36,59 @@ void print_usage(const char* prog)
 
 
 
-static int frepo_init(manifest_t* manifest, bool mirror)
+static int frepo_sync_manifest(manifest_t* manifest, bool mirror)
 {
+	if (!manifest)
+		return EXIT_FAILURE;
+
 	unsigned i;
 	for (i = 0; i < manifest->project_count; i++)
 	{
-		printf("Cloning new repository (%u/%u) '%s'.\n",
+		bool exists = git_exists(manifest->project[i].path);
+
+		printf("%s repository (%u/%u) '%s'.\n",
+			(exists ? "Updating" : "Cloning"),
 			(i + 1), manifest->project_count,
 			manifest->project[i].path);
+
+		char* revision = NULL;
+		bool revision_differs = false;
+
+		if (exists && !mirror)
+		{
+			revision = git_current_branch(
+				manifest->project[i].path);
+			if (!revision)
+			{
+				fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
+					manifest->project[i].path);
+				continue;
+			}
+
+			revision_differs
+				= (strcmp(revision, manifest->project[i].revision) != 0);
+			if (revision_differs && !git_checkout(
+				manifest->project[i].path,
+				manifest->project[i].revision, false))
+			{
+				free(revision);
+				fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
+					manifest->project[i].revision,
+					manifest->project[i].path);
+				continue;
+			}
+		}
 
 		if (!git_update(
 			manifest->project[i].path,
 			manifest->project[i].remote,
 			manifest->project[i].name,
 			manifest->project[i].remote_name,
-			manifest->project[i].revision,
-			mirror))
+			manifest->project[i].revision, mirror))
 		{
-			fprintf(stderr, "Error: Failed to clone '%s'\n",
+			fprintf(stderr, "Error: Failed to %s '%s'.\n",
+				(exists ? "update" : "clone"),
 				manifest->project[i].path);
-			return EXIT_FAILURE;
 		}
 
 		unsigned j;
@@ -70,15 +103,27 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 				manifest->project[i].copyfile[j].dest);
 			if (system(cmd) != EXIT_SUCCESS)
 			{
+				unsigned k;
+				for (k = 0; k < i; k++)
+					git_remove(manifest->project[k].path);
 				fprintf(stderr,
 					"Error: Failed to perform copy '%s' to '%s'"
 					" for project '%s'\n",
 					manifest->project[i].copyfile[j].source,
 					manifest->project[i].copyfile[j].dest,
 					manifest->project[i].path);
-				return EXIT_FAILURE;
 			}
 		}
+
+		if (revision_differs && !git_checkout(
+			manifest->project[i].path,
+			manifest->project[i].revision, false))
+		{
+			fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
+				manifest->project[i].path, revision);
+		}
+
+		free(revision);
 	}
 	return EXIT_SUCCESS;
 }
@@ -235,84 +280,9 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 				goto frepo_sync_failed;
 			}
 		}
-	}
 
-	if (manifest_updated)
-	{
-		unsigned i;
-		for (i = 0; i < manifest_updated->project_count; i++)
-		{
-			printf("Updating existing repository (%u/%u) '%s'.\n",
-				(i + 1), manifest_updated->project_count,
-				manifest_updated->project[i].path);
-
-			char* revision = git_current_branch(
-				manifest_updated->project[i].path);
-			if (!revision)
-			{
-				fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
-					manifest_updated->project[i].path);
-				continue;
-			}
-
-			bool revision_differs
-				= (strcmp(revision, manifest_updated->project[i].revision) != 0);
-			if (revision_differs && !git_checkout(
-				manifest_updated->project[i].path,
-				manifest_updated->project[i].revision, false))
-			{
-				free(revision);
-				fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
-					manifest_updated->project[i].revision,
-					manifest_updated->project[i].path);
-				continue;
-			}
-
-			if (!git_update(
-				manifest_updated->project[i].path,
-				manifest_updated->project[i].remote,
-				manifest_updated->project[i].name,
-				manifest_updated->project[i].remote_name,
-				manifest_updated->project[i].revision, false))
-			{
-				fprintf(stderr, "Error: Failed to update '%s'.\n",
-					manifest_updated->project[i].path);
-			}
-
-			unsigned j;
-			for (j = 0; j < manifest_updated->project[i].copyfile_count; j++)
-			{
-				char cmd[strlen(manifest_updated->project[i].path)
-					+ strlen(manifest_updated->project[i].copyfile[j].source)
-					+ strlen(manifest_updated->project[i].copyfile[j].dest) + 16];
-				sprintf(cmd, "cp %s/%s %s",
-					manifest_updated->project[i].path,
-					manifest_updated->project[i].copyfile[j].source,
-					manifest_updated->project[i].copyfile[j].dest);
-				if (system(cmd) != EXIT_SUCCESS)
-				{
-					unsigned k;
-					for (k = 0; k < i; k++)
-						git_remove(manifest_updated->project[k].path);
-					fprintf(stderr,
-						"Error: Failed to perform copy '%s' to '%s'"
-						" for project '%s'\n",
-						manifest_updated->project[i].copyfile[j].source,
-						manifest_updated->project[i].copyfile[j].dest,
-						manifest_updated->project[i].path);
-				}
-			}
-
-			if (revision_differs && !git_checkout(
-				manifest_updated->project[i].path,
-				manifest_updated->project[i].revision, false))
-			{
-				fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
-					manifest_updated->project[i].path, revision);
-			}
-
-			free(revision);
-		}
+		if (frepo_sync_manifest(manifest_updated, false) != EXIT_SUCCESS)
+			return EXIT_FAILURE;
 	}
 
 	if (manifest_old)
@@ -723,7 +693,7 @@ int main(int argc, char* argv[])
 	switch (command)
 	{
 		case frepo_command_init:
-			ret = frepo_init(manifest, mirror);
+			ret = frepo_sync_manifest(manifest, mirror);
 			break;
 		case frepo_command_sync:
 			ret = frepo_sync(manifest, manifest_path, force, branch);
