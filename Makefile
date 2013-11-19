@@ -3,9 +3,9 @@ PROJECT = frepo
 CC     ?= gcc
 LD     ?= gcc
 
-CFLAGS ?= -O3 -Wextra
+CFLAGS ?= -O3 -Wextra -Isrc
 
-SOURCE  = $(foreach dir, ., $(wildcard $(dir)/*.c))
+SOURCE  = $(foreach dir, ., $(wildcard $(dir)/src/*.c))
 OBJECTS = $(patsubst %.c, %.o, $(SOURCE))
 
 .PHONY : all
