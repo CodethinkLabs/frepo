@@ -470,9 +470,7 @@ static int frepo_forall(manifest_t* manifest, int argc, char** argv, bool print)
 
 		if (system(cmd) != EXIT_SUCCESS)
 		{
-			fprintf(stderr, "Error: Command '%s' failed for project '%s'.\n",
-				cmd, manifest->project[j].path);
-			return EXIT_FAILURE;
+			/* Do nothing. */
 		}
 
 		if (chdir(pdir) != 0)
