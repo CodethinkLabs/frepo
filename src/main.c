@@ -273,16 +273,15 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 			if (!git_uncomitted_changes(
 				manifest_updated->project[i].path, &uncommitted_changes))
 			{
-				fprintf(stderr, "Error: '%s' is deprecated but can't remove"
-					" because checking for uncommitted changes failed.\n",
-					manifest_updated->project[i].name);
+				fprintf(stderr, "Error: Failed to check for uncommitted changes"
+					" in  '%s', won't update.\n",
+						manifest_updated->project[i].name);
 				goto frepo_sync_failed;
 			}
 			else if (uncommitted_changes)
 			{
-				fprintf(stderr, "Error: '%s' is deprecated but can't remove"
-					" because it has uncommitted changes.\n",
-					manifest_old->project[i].name);
+				fprintf(stderr, "Error: '%s' has uncommitted changes"
+					", won't update.\n", manifest_updated->project[i].name);
 				goto frepo_sync_failed;
 			}
 		}
