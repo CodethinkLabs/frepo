@@ -117,7 +117,7 @@ static bool frepo_sync_manifest(manifest_t* manifest, bool mirror)
 
 		if (revision_differs && !git_checkout(
 			manifest->project[i].path,
-			manifest->project[i].revision, false))
+			revision, false))
 		{
 			fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
 				manifest->project[i].path, revision);
