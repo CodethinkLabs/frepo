@@ -112,7 +112,8 @@ bool git_update(
 		strcpy(auto_path, remote);
 		if (remote_path)
 		{
-			strcat(auto_path, "/");
+			if (auto_path[strlen(auto_path) - 1] != '/')
+				strcat(auto_path, "/");
 			strcat(auto_path, remote_path);
 		}
 
@@ -162,7 +163,8 @@ bool git_update(
 
 			if (remote_path)
 			{
-				strcat(cmd, "/");
+				if (remote_path[strlen(remote_path) - 1] != '/')
+					strcat(cmd, "/");
 				strcat(cmd, remote_path);
 			}
 
@@ -176,7 +178,8 @@ bool git_update(
 
 		if (remote_path)
 		{
-			strcat(cmd, "/");
+			if (remote_path[strlen(remote_path) - 1] != '/')
+				strcat(cmd, "/");
 			strcat(cmd, remote_path);
 		}
 
