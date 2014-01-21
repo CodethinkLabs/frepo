@@ -86,6 +86,7 @@ manifest_t* manifest_parse(xml_tag_t* document)
 				free(manifest);
 				return NULL;
 			}
+			j++;
 		}
 	}
 
