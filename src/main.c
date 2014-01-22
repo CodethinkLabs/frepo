@@ -27,11 +27,11 @@ typedef enum
 
 void print_usage(const char* prog)
 {
-	printf("%s init name -u manifest [-b branch] [--mirror]\n", prog);
-	printf("%s sync [-f] [-b branch]\n", prog);
-	printf("%s snapshot name\n", prog);
-	printf("%s list\n", prog);
-	printf("%s forall [-p] -c command\n", prog);
+	printf("%s init name -u manifest [-b branch] [-g groups] [--mirror]\n", prog);
+	printf("%s sync [-f] [-b branch] [-g groups]\n", prog);
+	printf("%s snapshot name [-g groups]\n", prog);
+	printf("%s list [-g groups]\n", prog);
+	printf("%s forall  [-g groups] [-p] -c command\n", prog);
 }
 
 
@@ -134,7 +134,10 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 		? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
-static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool force, const char* branch)
+static int frepo_sync(
+	manifest_t* manifest, const char* manifest_path,
+	bool force, const char* branch,
+	group_t* group, unsigned group_count)
 {
 	char* manifest_branch = NULL;
 	char* manifest_branch_old = NULL;
@@ -213,6 +216,18 @@ static int frepo_sync(manifest_t* manifest, const char* manifest_path, bool forc
 			fprintf(stderr, "Error: Failed to read new manifest.\n");
 			goto frepo_sync_failed;
 		}
+
+		manifest_t* manifest_filtered
+			= manifest_group_filter(manifest_updated, group, group_count);
+		if (!manifest_filtered)
+		{
+			fprintf(stderr, "Error: Failed to filter new manifest.\n");
+			goto frepo_sync_failed;
+		}
+		manifest_filtered->document = manifest_updated->document;
+		manifest_updated->document = NULL;
+		manifest_delete(manifest_updated);
+		manifest_updated = manifest_filtered;
 
 		manifest_old = manifest_subtract(
 			manifest, manifest_updated);
@@ -515,9 +530,13 @@ int main(int argc, char* argv[])
 	const char* name   = NULL;
 	const char* repo   = NULL;
 	const char* branch = NULL;
-	bool        mirror = false;
 	bool        force  = false;
 	bool        print  = false;
+
+	/* TODO - Initialize from settings file in .frepo */
+	bool     mirror = false;
+	group_t* group = NULL;
+	unsigned group_count = 0;
 
 	int    fa_argc = 0;
 	char** fa_argv = NULL;
@@ -592,6 +611,25 @@ int main(int argc, char* argv[])
 						return EXIT_FAILURE;
 					}
 					branch = argv[++a];
+					break;
+				case 'g':
+					if ((a + 1) >= argc)
+					{
+						fprintf(stderr,
+							"Error: No groups supplied with group flag.\n");
+						print_usage(argv[0]);
+						return EXIT_FAILURE;
+					}
+
+					if (!group_list_parse(
+						argv[++a], true,
+						&group, &group_count))
+					{
+						fprintf(stderr,
+							"Error: Failed to parse groups.\n");
+						print_usage(argv[0]);
+						return EXIT_FAILURE;
+					}
 					break;
 				case 'c':
 					if (command != frepo_command_forall)
@@ -740,19 +778,30 @@ int main(int argc, char* argv[])
 
 	manifest_t* manifest
 		= manifest_read(manifest_path);
-
 	if (!manifest)
 	{
+		manifest = manifest_read("manifest/default.xml");
+		if (!manifest)
+		{
+			fprintf(stderr, "Error: Unable to read manifest file.\n");
+			return EXIT_FAILURE;
+		}
 		fprintf(stderr, "Warning: Failed to read stored manifest"
 			", frepo may fail to track deletions cleanly.\n");
-		manifest = manifest_read("manifest/default.xml");
 	}
 
-	if (!manifest)
+	manifest_t* manifest_filtered
+		= manifest_group_filter(manifest, group, group_count);
+	if (!manifest_filtered)
 	{
-		fprintf(stderr, "Error: Unable to read manifest file.\n");
+		fprintf(stderr, "Error: Failed to filter manifest groups.\n");
+		manifest_delete(manifest);
 		return EXIT_FAILURE;
 	}
+	manifest_filtered->document = manifest->document;
+	manifest->document = NULL;
+	manifest_delete(manifest);
+	manifest = manifest_filtered;
 
 	int ret = EXIT_FAILURE;
 	switch (command)
@@ -761,7 +810,10 @@ int main(int argc, char* argv[])
 			ret = frepo_init(manifest, mirror);
 			break;
 		case frepo_command_sync:
-			ret = frepo_sync(manifest, manifest_path, force, branch);
+			ret = frepo_sync(
+				manifest, manifest_path,
+				force, branch,
+				group, group_count);
 			break;
 		case frepo_command_snapshot:
 			ret = frepo_snapshot(manifest, manifest_path, name);
@@ -786,5 +838,6 @@ int main(int argc, char* argv[])
 	}
 
 	manifest_delete(manifest);
+	free(group);
 	return ret;
 }

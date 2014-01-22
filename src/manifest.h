@@ -2,6 +2,7 @@
 #define __manifest_h__
 
 #include "xml.h"
+#include "group.h"
 #include <stdbool.h>
 
 typedef struct
@@ -25,6 +26,8 @@ typedef struct
 	const char* revision;
 	copyfile_t* copyfile;
 	unsigned    copyfile_count;
+	group_t*    group;
+    unsigned    group_count;
 } project_t;
 
 typedef struct
@@ -46,5 +49,9 @@ extern manifest_t* manifest_copy(manifest_t* a);
 extern manifest_t* manifest_subtract(manifest_t* a, manifest_t* b);
 
 extern bool manifest_write_snapshot(manifest_t* manifest, const char* path);
+
+extern manifest_t* manifest_group_filter(
+	manifest_t* manifest,
+	group_t* filter, unsigned filter_count);
 
 #endif

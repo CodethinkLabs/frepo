@@ -20,7 +20,10 @@ void manifest_delete(manifest_t* manifest)
 
 	unsigned i;
 	for (i = 0; i < manifest->project_count; i++)
+	{
 		free(manifest->project[i].copyfile);
+		free(manifest->project[i].group);
+	}
 
 	if (manifest->document)
 		xml_tag_delete(manifest->document);
@@ -175,6 +178,9 @@ manifest_t* manifest_parse(xml_tag_t* document)
 			project->copyfile_count = 0;
 			project->copyfile = NULL;
 
+			project->group_count = 0;
+			project->group = NULL;
+
 			unsigned k;
 			for (k = 0; k < mdoc->tag[i]->tag_count; k++)
 			{
@@ -220,6 +226,20 @@ manifest_t* manifest_parse(xml_tag_t* document)
 				}
 
 				project->copyfile_count++;
+			}
+
+			const char* groups
+				= xml_tag_field(mdoc->tag[i], "groups");
+			if (groups)
+			{
+				if (!group_list_parse(groups, false,
+					&project->group, &project->group_count))
+				{
+					fprintf(stderr,
+						"Error: Failed to parse group list.\n");
+						manifest_delete(manifest);
+						return NULL;
+				}
 			}
 
 			if (!project->path
@@ -312,8 +332,14 @@ manifest_t* manifest_copy(manifest_t* a)
 	for (i = 0; i < a->project_count; i++)
 	{
 		manifest->project[i] = a->project[i];
-
 		manifest->project[i].copyfile = NULL;
+		manifest->project[i].copyfile_count = 0;
+		manifest->project[i].group = NULL;
+		manifest->project[i].group_count = 0;
+	}
+
+	for (i = 0; i < a->project_count; i++)
+	{
 		if (a->project[i].copyfile_count)
 		{
 			manifest->project[i].copyfile
@@ -321,12 +347,6 @@ manifest_t* manifest_copy(manifest_t* a)
 					a->project[i].copyfile_count * sizeof(copyfile_t));
 			if (!manifest->project[i].copyfile)
 			{
-				unsigned j;
-				for (j = i; j < a->project_count; j++)
-				{
-					manifest->project[j].copyfile = NULL;
-					manifest->project[j].copyfile_count = 0;
-				}
 				manifest_delete(manifest);
 				return NULL;
 			}
@@ -336,6 +356,18 @@ manifest_t* manifest_copy(manifest_t* a)
 				(a->project[i].copyfile_count * sizeof(copyfile_t)));
 			manifest->project[i].copyfile_count
 				= a->project[i].copyfile_count;
+		}
+		if (a->project[i].group_count)
+		{
+			if (!group_list_copy(
+				a->project[i].group,
+				a->project[i].group_count,
+				&manifest->project[i].group,
+				&manifest->project[i].group_count))
+			{
+				manifest_delete(manifest);
+				return NULL;
+			}
 		}
 	}
 
@@ -378,6 +410,14 @@ manifest_t* manifest_subtract(manifest_t* a, manifest_t* b)
 	for (i = 0; i < a->remote_count; i++)
 		manifest->remote[i] = a->remote[i];
 
+	for (i = 0; i < project_count; i++)
+	{
+		manifest->project[i].copyfile = NULL;
+		manifest->project[i].copyfile_count = 0;
+		manifest->project[i].group = NULL;
+		manifest->project[i].group_count = 0;
+	}
+
 	unsigned k;
 	for (i = 0, k = 0; i < a->project_count; i++)
 	{
@@ -397,12 +437,6 @@ manifest_t* manifest_subtract(manifest_t* a, manifest_t* b)
 						manifest->project[i].copyfile_count * sizeof(copyfile_t));
 				if (!manifest->project[k].copyfile)
 				{
-					unsigned l;
-					for (l = k; l < project_count; l++)
-					{
-						manifest->project[l].copyfile = NULL;
-						manifest->project[l].copyfile_count = 0;
-					}
 					manifest_delete(manifest);
 					return NULL;
 				}
@@ -410,6 +444,18 @@ manifest_t* manifest_subtract(manifest_t* a, manifest_t* b)
 					manifest->project[k].copyfile,
 					a->project[i].copyfile,
 					(a->project[i].copyfile_count * sizeof(copyfile_t)));
+			}
+			if (a->project[i].group_count)
+			{
+				if (!group_list_copy(
+					a->project[i].group,
+					a->project[i].group_count,
+					&manifest->project[k].group,
+					&manifest->project[k].group_count))
+				{
+					manifest_delete(manifest);
+					return NULL;
+				}
 			}
 			k++;
 		}
@@ -464,6 +510,20 @@ bool manifest_write_snapshot(manifest_t* manifest, const char* path)
 			project->path, project->name,
 			revision, project->remote_name);
 
+		if (project->group_count > 0)
+		{
+			fprintf(fp, " group=\"");
+			unsigned j;
+			for (j = 0; j < project->group_count; j++)
+			{
+				fprintf(fp, "%s%.*s",
+					(j > 0 ? "," : ""),
+					project->group[j].size,
+					project->group[j].name);
+			}
+			fprintf(fp, "\"");
+		}
+
 		free(revision);
 
 		if (project->copyfile_count)
@@ -489,4 +549,129 @@ bool manifest_write_snapshot(manifest_t* manifest, const char* path)
 	bool err = ferror(fp);
 	fclose(fp);
 	return !err;
+}
+
+
+
+manifest_t* manifest_group_filter(
+	manifest_t* manifest,
+	group_t* filter, unsigned filter_count)
+{
+	if (!manifest)
+		return NULL;
+
+	bool include_default = true;
+	bool include_all = false;
+
+	unsigned i;
+	if (group_list_match(
+		"default", strlen("default"),
+		filter, filter_count, &i))
+		include_default = !filter[i].exclude;
+	if (group_list_match(
+		"all", strlen("all"),
+		filter, filter_count, &i))
+		include_all = !filter[i].exclude;
+
+	bool mask[manifest->project_count];
+
+	unsigned project_count = 0;
+	for (i = 0; i < manifest->project_count; i++)
+	{
+		mask[i] = include_all;
+		if ((manifest->project[i].group_count == 0)
+			|| (group_list_match(
+				"default", strlen("default"),
+				manifest->project[i].group,
+				manifest->project[i].group_count, NULL)))
+		{
+			mask[i] |= include_default;
+		}
+		else if (filter)
+		{
+			unsigned j;
+			for (j = 0; j < filter_count; j++)
+			{
+				unsigned m;
+				if (group_list_match(
+					filter[j].name, filter[j].size,
+					manifest->project[i].group,
+					manifest->project[i].group_count,
+					&m))
+					mask[i] = !filter[j].exclude;
+			}
+		}
+
+		if (mask[i])
+			project_count++;
+	}
+
+	manifest_t* filtered = (manifest_t*)malloc(
+		sizeof(manifest_t)
+		+ (manifest->remote_count * sizeof(remote_t))
+		+ (project_count * sizeof(project_t)));
+	if (!filtered) return NULL;
+	filtered->remote_count = manifest->remote_count;
+	filtered->remote  = (remote_t*)((uintptr_t)filtered + sizeof(manifest_t));
+	filtered->project_count = project_count;
+	filtered->project = (project_t*)&filtered->remote[filtered->remote_count];
+	filtered->document = NULL;
+
+	for (i = 0; i < manifest->remote_count; i++)
+		filtered->remote[i] = manifest->remote[i];
+
+	unsigned j;
+	for (i = 0, j = 0; i < manifest->project_count; i++)
+	{
+		if (!mask[i])
+			continue;
+
+		filtered->project[j] = manifest->project[i];
+		filtered->project[j].copyfile = NULL;
+		filtered->project[j].copyfile_count = 0;
+		filtered->project[j].group = NULL;
+		filtered->project[j].group_count = 0;
+
+		j++;
+	}
+
+	for (i = 0, j = 0; i < manifest->project_count; i++)
+	{
+		if (!mask[i])
+			continue;
+
+		if (manifest->project[i].copyfile_count)
+		{
+			filtered->project[j].copyfile
+				= (copyfile_t*)malloc(
+					manifest->project[i].copyfile_count * sizeof(copyfile_t));
+			if (!filtered->project[j].copyfile)
+			{
+				manifest_delete(filtered);
+				return NULL;
+			}
+			memcpy(
+				filtered->project[j].copyfile,
+				manifest->project[i].copyfile,
+				(manifest->project[i].copyfile_count * sizeof(copyfile_t)));
+			filtered->project[j].copyfile_count
+				= manifest->project[i].copyfile_count;
+		}
+		if (manifest->project[i].group_count)
+		{
+			if (!group_list_copy(
+				manifest->project[i].group,
+				manifest->project[i].group_count,
+				&filtered->project[j].group,
+				&filtered->project[j].group_count))
+			{
+				manifest_delete(filtered);
+				return NULL;
+			}
+		}
+
+		j++;
+	}
+
+	return filtered;
 }
