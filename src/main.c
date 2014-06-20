@@ -681,7 +681,7 @@ int main(int argc, char* argv[])
 		{
 			if (errno != EEXIST)
 			{
-				fprintf(stderr, "Error: Failed to create '.frepo' directory.\n", name);
+				fprintf(stderr, "Error: Failed to create '.frepo' directory.\n");
 				return EXIT_FAILURE;
 			}
 		}
@@ -725,7 +725,7 @@ int main(int argc, char* argv[])
 		{
 			if (errno != EEXIST)
 			{
-				fprintf(stderr, "Error: Failed to create '.frepo' directory.\n", name);
+				fprintf(stderr, "Error: Failed to create '.frepo' directory.\n");
 				return EXIT_FAILURE;
 			}
 		}
