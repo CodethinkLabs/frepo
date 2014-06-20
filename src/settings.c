@@ -5,6 +5,9 @@
 #include <ctype.h>
 
 
+const char* manifest_repo_default = "manifest";
+const char* manifest_name_default = "default.xml";
+
 
 settings_t* settings_create(bool mirror)
 {
@@ -13,9 +16,12 @@ settings_t* settings_create(bool mirror)
 			sizeof(settings_t));
 	if (!settings) return NULL;
 
-	settings->mirror      = mirror;
-	settings->group       = NULL;
-	settings->group_count = 0;
+	settings->manifest_repo = (char*)manifest_repo_default;
+	settings->manifest_name = (char*)manifest_name_default;
+	settings->manifest_path = NULL;
+	settings->mirror        = mirror;
+	settings->group         = NULL;
+	settings->group_count   = 0;
 	settings->group_string  = NULL;
 	return settings;
 }
@@ -24,9 +30,91 @@ void settings_delete(settings_t* settings)
 {
 	if (!settings)
 		return;
+	if (settings->manifest_repo != manifest_repo_default)
+		free(settings->manifest_repo);
+	if (settings->manifest_name != manifest_name_default)
+		free(settings->manifest_name);
+	free(settings->manifest_path);
 	free(settings->group);
 	free(settings->group_string);
 	free(settings);
+}
+
+
+
+bool settings_manifest_repo_set(
+	settings_t* settings, const char* repo)
+{
+	if (!settings)
+		return false;
+
+	if (!repo)
+	{
+		if (settings->manifest_repo != manifest_repo_default)
+			free(settings->manifest_repo);
+		settings->manifest_repo = (char*)manifest_repo_default;
+	}
+	else
+	{
+		size_t rlen = strlen(repo) + 1;
+		char* nrepo = (char*)malloc(rlen);
+		if (!nrepo) return false;
+		memcpy(nrepo, repo, rlen);
+		settings->manifest_repo = nrepo;
+	}
+
+	free(settings->manifest_path);
+	settings->manifest_path = NULL;
+	return true;
+}
+
+bool settings_manifest_name_set(
+	settings_t* settings, const char* name)
+{
+	if (!settings)
+		return false;
+
+	if (!name)
+	{
+		if (settings->manifest_name != manifest_name_default)
+			free(settings->manifest_name);
+		settings->manifest_name = (char*)manifest_name_default;
+	}
+	else
+	{
+		size_t rlen = strlen(name) + 1;
+		char* nname = (char*)malloc(rlen);
+		if (!nname) return false;
+		memcpy(nname, name, rlen);
+		settings->manifest_name = nname;
+	}
+
+	free(settings->manifest_path);
+	settings->manifest_path = NULL;
+	return true;
+}
+
+
+
+const char* settings_manifest_path_get(settings_t* settings)
+{
+	if (!settings)
+		return NULL;
+
+	if (!settings->manifest_path)
+	{
+		size_t rlen = strlen(settings->manifest_repo);
+		size_t nlen = strlen(settings->manifest_name);
+		size_t plen = rlen + 1 + nlen + 1;
+		char* npath = (char*)malloc(plen);
+		if (!npath) return NULL;
+		sprintf(npath, "%s/%s",
+			settings->manifest_repo,
+			settings->manifest_name);
+		settings->manifest_path = npath;
+	}
+
+	return (const char*)settings->manifest_path;
 }
 
 
@@ -65,7 +153,21 @@ settings_t* settings_read(const char* path)
 		while (isspace(*value))
 			value = &value[1];
 
-		if (strncmp(sline, "mirror", 6) == 0)
+		if (strncmp(sline, "manifest-repo", 13) == 0)
+		{
+			if (value[0] == '\0')
+				continue;
+			settings_manifest_repo_set(
+				settings, value);
+		}
+		else if (strncmp(sline, "manifest-name", 13) == 0)
+		{
+			if (value[0] == '\0')
+				continue;
+			settings_manifest_name_set(
+				settings, value);
+		}
+		else if (strncmp(sline, "mirror", 6) == 0)
 		{
 			if ((value[0] == '\0')
 				|| (value[1] != '\0')
@@ -100,12 +202,22 @@ settings_t* settings_read(const char* path)
 
 bool settings_write(settings_t* settings, const char* path)
 {
-	if (!settings->mirror
+	if ((settings->manifest_repo == manifest_repo_default)
+		&& (settings->manifest_name == manifest_name_default)
+		&& !settings->mirror
 		&& (settings->group_count == 0))
 		return true;
 
 	FILE* fp = fopen(path, "w");
 	if (!fp) return false;
+
+	if (settings->manifest_repo
+		&& (settings->manifest_repo != manifest_repo_default))
+		fprintf(fp, "manifest-repo=%s\n", settings->manifest_repo);
+
+	if (settings->manifest_name
+		&& (settings->manifest_name != manifest_name_default))
+		fprintf(fp, "manifest-name=%s\n", settings->manifest_name);
 
 	if (settings->mirror)
 		fprintf(fp, "mirror=%u\n", (unsigned)settings->mirror);

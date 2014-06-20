@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <errno.h>
+#include <libgen.h>
 
 #include "git.h"
 #include "xml.h"
@@ -136,7 +137,9 @@ static int frepo_init(manifest_t* manifest, bool mirror)
 }
 
 static int frepo_sync(
-	manifest_t* manifest, const char* manifest_path,
+	manifest_t* manifest,
+	const char* manifest_repo,
+	const char* manifest_path,
 	bool force, const char* branch,
 	group_t* group, unsigned group_count)
 {
@@ -155,7 +158,7 @@ static int frepo_sync(
 	}
 
 	bool manifest_uncommitted_changes;
-	if (!git_uncomitted_changes("manifest", &manifest_uncommitted_changes))
+	if (!git_uncomitted_changes(manifest_repo, &manifest_uncommitted_changes))
 	{
 		fprintf(stderr, "Error: Failed to check for uncommitted changes"
 			" in your manifest.\n");
@@ -169,7 +172,7 @@ static int frepo_sync(
 	}
 
 	manifest_head_old
-		= git_current_commit("manifest");
+		= git_current_commit(manifest_repo);
 	if (!manifest_head_old)
 	{
 		fprintf(stderr, "Error: Failed to get local manifest commit.\n");
@@ -178,11 +181,11 @@ static int frepo_sync(
 
 	printf("Updating manifest.\n");
 
-	manifest_branch = git_current_branch("manifest");
+	manifest_branch = git_current_branch(manifest_repo);
 	if (branch)
 	{
 		manifest_branch_old = manifest_branch;
-		if (!git_checkout("manifest", branch, false))
+		if (!git_checkout(manifest_repo, branch, false))
 		{
 			fprintf(stderr, "Error: Failed to checkout manifest branch.\n");
 			goto frepo_sync_failed;
@@ -190,7 +193,7 @@ static int frepo_sync(
 		manifest_branch = (char*)branch;
 	}
 
-	if (!git_update("manifest",
+	if (!git_update(manifest_repo,
 			NULL, NULL, NULL,
 			manifest_branch, false))
 	{
@@ -199,7 +202,7 @@ static int frepo_sync(
 	}
 
 	manifest_head_latest
-		= git_current_commit("manifest");
+		= git_current_commit(manifest_repo);
 	if (!manifest_head_latest)
 	{
 		fprintf(stderr, "Error: Failed to get latest manifest commit.\n");
@@ -334,9 +337,9 @@ static int frepo_sync(
 
 frepo_sync_failed:
 	if (manifest_branch_old)
-		git_checkout("manifest", manifest_branch_old, false);
+		git_checkout(manifest_repo, manifest_branch_old, false);
 	if (manifest_head_old)
-		git_reset_hard("manifest", manifest_head_old);
+		git_reset_hard(manifest_repo, manifest_head_old);
 	manifest_delete(manifest_updated);
 	manifest_delete(manifest_old);
 	free(manifest_head_latest);
@@ -347,10 +350,14 @@ frepo_sync_failed:
 	return EXIT_FAILURE;
 }
 
-static int frepo_snapshot(manifest_t* manifest, const char* manifest_path, const char* name)
+static int frepo_snapshot(
+	manifest_t* manifest,
+	const char* manifest_repo,
+	const char* manifest_path,
+	const char* name)
 {
 	bool changes;
-	if (!git_uncomitted_changes("manifest", &changes))
+	if (!git_uncomitted_changes(manifest_repo, &changes))
 	{
 		fprintf(stderr, "Error: Failed to check for uncommitted changes to manifest.\n");
 		return EXIT_FAILURE;
@@ -362,9 +369,9 @@ static int frepo_snapshot(manifest_t* manifest, const char* manifest_path, const
 		return EXIT_FAILURE;
 	}
 
-	char* branch = git_current_branch("manifest");
+	char* branch = git_current_branch(manifest_repo);
 	if (!branch)
-		branch = git_current_commit("manifest");
+		branch = git_current_commit(manifest_repo);
 
 	if (!branch)
 	{
@@ -372,7 +379,7 @@ static int frepo_snapshot(manifest_t* manifest, const char* manifest_path, const
 		return EXIT_FAILURE;
 	}
 
-	if (!git_checkout("manifest", name, true))
+	if (!git_checkout(manifest_repo, name, true))
 	{
 		free(branch);
 		fprintf(stderr, "Error: Failed to checkout snapshot branch '%s'.\n", name);
@@ -388,15 +395,15 @@ static int frepo_snapshot(manifest_t* manifest, const char* manifest_path, const
 		goto frepo_snapshot_failed;
 	}
 
-	if (!git_commit("manifest", snapshot_message))
+	if (!git_commit(manifest_repo, snapshot_message))
 	{
 		fprintf(stderr, "Error: Failed to commit snapshot, reverting.\n");
-		if (!git_reset_hard("manifest", "HEAD"))
+		if (!git_reset_hard(manifest_repo, "HEAD"))
 			fprintf(stderr, "Warning: Failed to reset uncommitted snapshot.\n");
 		goto frepo_snapshot_failed;
 	}
 
-	if (!git_checkout("manifest", branch, false))
+	if (!git_checkout(manifest_repo, branch, false))
 		fprintf(stderr, "Warning: Failed to revert manifest"
 			" to previous branch '%s'.\n", branch);
 	free(branch);
@@ -404,10 +411,10 @@ static int frepo_snapshot(manifest_t* manifest, const char* manifest_path, const
 	return EXIT_SUCCESS;
 
 frepo_snapshot_failed:
-	if (!git_checkout("manifest", branch, false))
+	if (!git_checkout(manifest_repo, branch, false))
 		fprintf(stderr, "Warning: Failed to revert manifest"
 			" to previous branch '%s'.\n", branch);
-	else if (!git_reset_hard("manifest", "HEAD"))
+	else if (!git_reset_hard(manifest_repo, "HEAD"))
 		fprintf(stderr, "Warning: Failed to reset manifest to HEAD.\n");
 	free(branch);
 	return EXIT_FAILURE;
@@ -707,6 +714,14 @@ int main(int argc, char* argv[])
 
 	if (command == frepo_command_init)
 	{
+		if (!settings_manifest_repo_set(
+			settings, basename((char*)repo)))
+		{
+			fprintf(stderr,
+				"Error: Failed to set repository name from URL.\n");
+			return EXIT_FAILURE;
+		}
+
 		if (mkdir(name, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0)
 		{
 			if (errno != EEXIST)
@@ -742,7 +757,19 @@ int main(int argc, char* argv[])
 
 	const char* manifest_path = ".frepo/manifest.xml";
 
-	if (system("[ -d manifest ]") != EXIT_SUCCESS)
+	const char* manifest_base = settings_manifest_path_get(settings);
+	if (!manifest_base)
+	{
+		fprintf(stderr,
+			"Error: Failed to get manifest path from settings.\n");
+		return EXIT_FAILURE;
+	}
+	size_t manifest_base_size = strlen(manifest_base);
+
+	char manifest_find_cmd[strlen(settings->manifest_repo) + 8];
+	sprintf(manifest_find_cmd, "[ -d %s ]", settings->manifest_repo);
+
+	if (system(manifest_find_cmd) != EXIT_SUCCESS)
 	{
 		do
 		{
@@ -755,7 +782,7 @@ int main(int argc, char* argv[])
 		} while (true);
 
 		if ((system("[ -d .frepo ]") != EXIT_SUCCESS)
-			&& (system("[ -d manifest ]") != EXIT_SUCCESS))
+			&& (system(manifest_find_cmd) != EXIT_SUCCESS))
 		{
 			fprintf(stderr, "Error: Not in a frepo repository"
 				", no manifest directory found.\n");
@@ -777,8 +804,9 @@ int main(int argc, char* argv[])
 			}
 		}
 
-		char cmd[strlen(manifest_path) + 64];
-		sprintf(cmd, "cp manifest/default.xml %s", manifest_path);
+		char cmd[strlen(manifest_path) + manifest_base_size + 5];
+		sprintf(cmd, "cp %s %s",
+			manifest_base, manifest_path);
 		if (system(cmd) != EXIT_SUCCESS)
 		{
 			/* Safely ignore output. */
@@ -789,7 +817,7 @@ int main(int argc, char* argv[])
 		= manifest_read(manifest_path);
 	if (!manifest)
 	{
-		manifest = manifest_read("manifest/default.xml");
+		manifest = manifest_read(manifest_base);
 		if (!manifest)
 		{
 			fprintf(stderr, "Error: Unable to read manifest file.\n");
@@ -821,13 +849,18 @@ int main(int argc, char* argv[])
 			break;
 		case frepo_command_sync:
 			ret = frepo_sync(
-				manifest, manifest_path,
+				manifest,
+				settings->manifest_repo,
+				manifest_path,
 				force, branch,
 				settings->group,
 				settings->group_count);
 			break;
 		case frepo_command_snapshot:
-			ret = frepo_snapshot(manifest, manifest_path, name);
+			ret = frepo_snapshot(
+				manifest,
+				settings->manifest_repo,
+				manifest_path, name);
 			break;
 		case frepo_command_forall:
 			ret = frepo_forall(manifest, fa_argc, fa_argv, print);
@@ -841,8 +874,8 @@ int main(int argc, char* argv[])
 		&& ((command == frepo_command_init)
 			|| (command == frepo_command_sync)))
 	{
-		char cmd[strlen(manifest_path) + 64];
-		sprintf(cmd, "cp manifest/default.xml %s", manifest_path);
+		char cmd[strlen(manifest_path) + manifest_base_size + 5];
+		sprintf(cmd, "cp %s %s", manifest_base, manifest_path);
 		if (system(cmd) != EXIT_SUCCESS)
 			fprintf(stderr, "Warning: Failed to store current manifest state"
 				", frepo may fail to track deletions cleanly.\n");
