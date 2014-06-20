@@ -11,6 +11,7 @@
 #include "git.h"
 #include "xml.h"
 #include "manifest.h"
+#include "settings.h"
 
 
 typedef enum
@@ -533,10 +534,17 @@ int main(int argc, char* argv[])
 	bool        force  = false;
 	bool        print  = false;
 
-	/* TODO - Initialize from settings file in .frepo */
-	bool     mirror = false;
-	group_t* group = NULL;
-	unsigned group_count = 0;
+	const char* settings_path = ".frepo/config.ini";
+	settings_t* settings = settings_read(settings_path);
+	if (!settings)
+	{
+		settings = settings_create(false);
+		if (!settings)
+		{
+			fprintf(stderr, "Error: Failed to initialize settings.\n");
+			return EXIT_FAILURE;
+		}
+	}
 
 	int    fa_argc = 0;
 	char** fa_argv = NULL;
@@ -623,7 +631,8 @@ int main(int argc, char* argv[])
 
 					if (!group_list_parse(
 						argv[++a], true,
-						&group, &group_count))
+						&settings->group,
+						&settings->group_count))
 					{
 						fprintf(stderr,
 							"Error: Failed to parse groups.\n");
@@ -684,7 +693,7 @@ int main(int argc, char* argv[])
 					print_usage(argv[0]);
 					return EXIT_FAILURE;
 				}
-				mirror = true;
+				settings->mirror = true;
 			}
 			else
 			{
@@ -791,7 +800,8 @@ int main(int argc, char* argv[])
 	}
 
 	manifest_t* manifest_filtered
-		= manifest_group_filter(manifest, group, group_count);
+		= manifest_group_filter(manifest,
+			settings->group, settings->group_count);
 	if (!manifest_filtered)
 	{
 		fprintf(stderr, "Error: Failed to filter manifest groups.\n");
@@ -807,13 +817,14 @@ int main(int argc, char* argv[])
 	switch (command)
 	{
 		case frepo_command_init:
-			ret = frepo_init(manifest, mirror);
+			ret = frepo_init(manifest, settings->mirror);
 			break;
 		case frepo_command_sync:
 			ret = frepo_sync(
 				manifest, manifest_path,
 				force, branch,
-				group, group_count);
+				settings->group,
+				settings->group_count);
 			break;
 		case frepo_command_snapshot:
 			ret = frepo_snapshot(manifest, manifest_path, name);
@@ -835,9 +846,14 @@ int main(int argc, char* argv[])
 		if (system(cmd) != EXIT_SUCCESS)
 			fprintf(stderr, "Warning: Failed to store current manifest state"
 				", frepo may fail to track deletions cleanly.\n");
+
+		if (!settings_write(
+			settings, settings_path))
+			fprintf(stderr, "Warning: Failed to write settings file.\n");
 	}
 
 	manifest_delete(manifest);
-	free(group);
+	settings_delete(settings);
+
 	return ret;
 }

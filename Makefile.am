@@ -8,5 +8,7 @@ frepo_SOURCES = \
 	src/group.h \
 	src/manifest.c \
 	src/manifest.h \
+	src/settings.c \
+	src/settings.h \
 	src/xml.c \
 	src/xml.h
