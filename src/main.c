@@ -860,7 +860,7 @@ int main(int argc, char* argv[])
 			ret = frepo_snapshot(
 				manifest,
 				settings->manifest_repo,
-				manifest_path, name);
+				manifest_base, name);
 			break;
 		case frepo_command_forall:
 			ret = frepo_forall(manifest, fa_argc, fa_argv, print);
