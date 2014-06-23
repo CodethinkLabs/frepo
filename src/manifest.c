@@ -334,6 +334,8 @@ manifest_t* manifest_copy(manifest_t* a)
 				manifest->project[i].copyfile,
 				a->project[i].copyfile,
 				(a->project[i].copyfile_count * sizeof(copyfile_t)));
+			manifest->project[i].copyfile_count
+				= a->project[i].copyfile_count;
 		}
 	}
 
