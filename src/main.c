@@ -841,8 +841,11 @@ int main(int argc, char* argv[])
 			fprintf(stderr, "Error: Unable to read manifest file.\n");
 			return EXIT_FAILURE;
 		}
-		fprintf(stderr, "Warning: Failed to read stored manifest"
-			", frepo may fail to track deletions cleanly.\n");
+		if (command != frepo_command_init)
+		{
+			fprintf(stderr, "Warning: Failed to read stored manifest"
+				", frepo may fail to track deletions cleanly.\n");
+		}
 	}
 
 	manifest_t* manifest_filtered
