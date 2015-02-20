@@ -282,11 +282,8 @@ manifest_t* manifest_parse(xml_tag_t* document)
 manifest_t* manifest_read(const char* path)
 {
 	int fd = open(path, O_RDONLY);
-	if (fd < 0)
-	{
-		fprintf(stderr, "Error: Failed to open %s.\n", path);
-		return NULL;
-	}
+	if (fd < 0) return NULL;
+
 	struct stat manifest_stat;
 	if (fstat(fd, &manifest_stat) < 0)
 	{
