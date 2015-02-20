@@ -1,5 +1,7 @@
 bin_PROGRAMS = frepo
 
+frepo_LDFLAGS = -pthread
+
 frepo_SOURCES = \
 	src/git.c \
 	src/git.h \

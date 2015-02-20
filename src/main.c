@@ -26,6 +26,9 @@
 #include <unistd.h>
 #include <errno.h>
 #include <libgen.h>
+#include <pthread.h>
+#include <semaphore.h>
+#include <assert.h>
 
 #include "git.h"
 #include "xml.h"
@@ -47,110 +50,168 @@ typedef enum
 
 void print_usage(const char* prog)
 {
-	printf("%s init name -u manifest [-b branch] [-g groups] [--mirror]\n", prog);
-	printf("%s sync [-f] [-b branch] [-g groups]\n", prog);
+	printf("%s init name -u manifest [-b branch] [-g groups] [--mirror] [-j threads]\n", prog);
+	printf("%s sync [-f] [-b branch] [-g groups] [-j threads]\n", prog);
 	printf("%s snapshot name [-g groups]\n", prog);
 	printf("%s list [-g groups]\n", prog);
 	printf("%s forall  [-g groups] [-p] -c command\n", prog);
 }
 
 
+struct manifest_thread_params
+{
+	manifest_t* manifest;
+	bool        mirror;
 
-static bool frepo_sync_manifest(manifest_t* manifest, bool mirror)
+	sem_t           done_semaphore;
+	pthread_mutex_t done_mutex;
+	unsigned        done;
+
+	long int  threads_dead;
+	long int* threads;
+};
+
+static void* frepo_sync_manifest__thread(void* param)
+{
+	struct manifest_thread_params* tp
+		= (struct manifest_thread_params*)param;
+
+	while (true)
+	{
+		assert(pthread_mutex_lock(&tp->done_mutex) == 0);
+		if (tp->done >= tp->manifest->project_count)
+		{
+			tp->threads_dead++;
+			assert(pthread_mutex_unlock(&tp->done_mutex) == 0);
+			if (tp->threads_dead == *tp->threads)
+				sem_post(&tp->done_semaphore);
+			pthread_exit(NULL);
+		}
+		unsigned p = tp->done++;
+		assert(pthread_mutex_unlock(&tp->done_mutex) == 0);
+
+		{
+			bool exists = git_exists(tp->manifest->project[p].path);
+
+			printf("%s repository (%u/%u) '%s'.\n",
+				(exists ? "Updating" : "Cloning"),
+				(p + 1), tp->manifest->project_count,
+				tp->manifest->project[p].path);
+
+			char* revision = NULL;
+			bool revision_differs = false;
+
+			if (exists && !tp->mirror)
+			{
+				revision = git_current_branch(
+					tp->manifest->project[p].path);
+				if (!revision)
+				{
+					fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
+						tp->manifest->project[p].path);
+					continue;
+				}
+
+				revision_differs
+					= (strcmp(revision, tp->manifest->project[p].revision) != 0);
+				if (revision_differs && !git_checkout(
+					tp->manifest->project[p].path,
+					tp->manifest->project[p].revision, false))
+				{
+					free(revision);
+					fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
+						tp->manifest->project[p].revision,
+						tp->manifest->project[p].path);
+					continue;
+				}
+			}
+
+			if (!git_update(
+				tp->manifest->project[p].path,
+				tp->manifest->project[p].remote,
+				tp->manifest->project[p].name,
+				tp->manifest->project[p].remote_name,
+				tp->manifest->project[p].revision, tp->mirror))
+			{
+				fprintf(stderr, "Error: Failed to %s '%s'.\n",
+					(exists ? "update" : "clone"),
+					tp->manifest->project[p].path);
+			}
+
+			unsigned j;
+			for (j = 0; j < tp->manifest->project[p].copyfile_count; j++)
+			{
+				char cmd[strlen(tp->manifest->project[p].path)
+					+ strlen(tp->manifest->project[p].copyfile[j].source)
+					+ strlen(tp->manifest->project[p].copyfile[j].dest) + 16];
+				sprintf(cmd, "cp %s/%s %s",
+					tp->manifest->project[p].path,
+					tp->manifest->project[p].copyfile[j].source,
+					tp->manifest->project[p].copyfile[j].dest);
+				if (system(cmd) != EXIT_SUCCESS)
+				{
+					unsigned k;
+					for (k = 0; k < j; k++)
+						git_remove(tp->manifest->project[k].path);
+					fprintf(stderr,
+						"Error: Failed to perform copy '%s' to '%s'"
+						" for project '%s'\n",
+						tp->manifest->project[p].copyfile[j].source,
+						tp->manifest->project[p].copyfile[j].dest,
+						tp->manifest->project[p].path);
+				}
+			}
+
+			if (revision_differs && !git_checkout(
+				tp->manifest->project[p].path,
+				revision, false))
+			{
+				fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
+					tp->manifest->project[p].path, revision);
+			}
+
+			free(revision);
+		}
+	}
+
+	return NULL;
+}
+
+static bool frepo_sync_manifest(manifest_t* manifest, bool mirror, long int threads)
 {
 	if (!manifest)
 		return false;
 
-	unsigned i;
-	for (i = 0; i < manifest->project_count; i++)
+	struct manifest_thread_params tp =
 	{
-		bool exists = git_exists(manifest->project[i].path);
+		.manifest       = manifest,
+		.mirror         = mirror,
+		.done           = 0,
+		.threads_dead   = 0,
+		.threads        = &threads,
+	};
+	assert(sem_init(&tp.done_semaphore, 0, 0) >= 0);
+	assert(pthread_mutex_init(&tp.done_mutex, NULL) == 0);
 
-		printf("%s repository (%u/%u) '%s'.\n",
-			(exists ? "Updating" : "Cloning"),
-			(i + 1), manifest->project_count,
-			manifest->project[i].path);
+	pthread_t thread[threads];
 
-		char* revision = NULL;
-		bool revision_differs = false;
-
-		if (exists && !mirror)
-		{
-			revision = git_current_branch(
-				manifest->project[i].path);
-			if (!revision)
-			{
-				fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
-					manifest->project[i].path);
-				continue;
-			}
-
-			revision_differs
-				= (strcmp(revision, manifest->project[i].revision) != 0);
-			if (revision_differs && !git_checkout(
-				manifest->project[i].path,
-				manifest->project[i].revision, false))
-			{
-				free(revision);
-				fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
-					manifest->project[i].revision,
-					manifest->project[i].path);
-				continue;
-			}
-		}
-
-		if (!git_update(
-			manifest->project[i].path,
-			manifest->project[i].remote,
-			manifest->project[i].name,
-			manifest->project[i].remote_name,
-			manifest->project[i].revision, mirror))
-		{
-			fprintf(stderr, "Error: Failed to %s '%s'.\n",
-				(exists ? "update" : "clone"),
-				manifest->project[i].path);
-		}
-
-		unsigned j;
-		for (j = 0; j < manifest->project[i].copyfile_count; j++)
-		{
-			char cmd[strlen(manifest->project[i].path)
-				+ strlen(manifest->project[i].copyfile[j].source)
-				+ strlen(manifest->project[i].copyfile[j].dest) + 16];
-			sprintf(cmd, "cp %s/%s %s",
-				manifest->project[i].path,
-				manifest->project[i].copyfile[j].source,
-				manifest->project[i].copyfile[j].dest);
-			if (system(cmd) != EXIT_SUCCESS)
-			{
-				unsigned k;
-				for (k = 0; k < i; k++)
-					git_remove(manifest->project[k].path);
-				fprintf(stderr,
-					"Error: Failed to perform copy '%s' to '%s'"
-					" for project '%s'\n",
-					manifest->project[i].copyfile[j].source,
-					manifest->project[i].copyfile[j].dest,
-					manifest->project[i].path);
-			}
-		}
-
-		if (revision_differs && !git_checkout(
-			manifest->project[i].path,
-			revision, false))
-		{
-			fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
-				manifest->project[i].path, revision);
-		}
-
-		free(revision);
+	long int t;
+	for (t = 0; t < threads; t++)
+	{
+		assert(pthread_create(&thread[t], NULL,
+			frepo_sync_manifest__thread, &tp) == 0);
 	}
+
+	sem_wait(&tp.done_semaphore);
+	pthread_mutex_destroy(&tp.done_mutex);
+	sem_destroy(&tp.done_semaphore);
+
 	return true;
 }
 
-static int frepo_init(manifest_t* manifest, bool mirror)
+static int frepo_init(manifest_t* manifest, bool mirror, long int threads)
 {
-	return (frepo_sync_manifest(manifest, mirror)
+	return (frepo_sync_manifest(manifest, mirror, threads)
 		? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
@@ -159,7 +220,8 @@ static int frepo_sync(
 	const char* manifest_repo,
 	const char* manifest_path,
 	bool force, const char* branch,
-	group_t* group, unsigned group_count)
+	group_t* group, unsigned group_count,
+	long int threads)
 {
 	char* manifest_branch = NULL;
 	char* manifest_branch_old = NULL;
@@ -323,7 +385,7 @@ static int frepo_sync(
 			}
 		}
 
-		if (!frepo_sync_manifest(manifest_updated, false))
+		if (!frepo_sync_manifest(manifest_updated, false, threads))
 			return EXIT_FAILURE;
 	}
 
@@ -553,11 +615,12 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
-	const char* name   = NULL;
-	const char* repo   = NULL;
-	const char* branch = NULL;
-	bool        force  = false;
-	bool        print  = false;
+	const char* name    = NULL;
+	const char* repo    = NULL;
+	const char* branch  = NULL;
+	bool        force   = false;
+	bool        print   = false;
+	long int    threads = 0;
 
 	const char* settings_path = ".frepo/config.ini";
 	settings_t* settings = settings_read(settings_path);
@@ -699,6 +762,25 @@ int main(int argc, char* argv[])
 					}
 
 					force = true;
+					break;
+				case 'j':
+					if ((command != frepo_command_init)
+						&& (command != frepo_command_sync))
+					{
+						fprintf(stderr,
+							"Error: -j flag invalid for command.\n");
+						print_usage(argv[0]);
+						return EXIT_FAILURE;
+					}
+
+					threads = strtol(argv[++a], NULL, 0);
+					if (threads <= 0)
+					{
+						fprintf(stderr,
+							"Error: Invalid number of threads '%s'.\n", argv[a]);
+						print_usage(argv[0]);
+						return EXIT_FAILURE;
+					}
 					break;
 				default:
 					fprintf(stderr,
@@ -862,11 +944,14 @@ int main(int argc, char* argv[])
 	manifest_delete(manifest);
 	manifest = manifest_filtered;
 
+	if (threads <= 0)
+		threads = manifest->threads;
+
 	int ret = EXIT_FAILURE;
 	switch (command)
 	{
 		case frepo_command_init:
-			ret = frepo_init(manifest, settings->mirror);
+			ret = frepo_init(manifest, settings->mirror, threads);
 			break;
 		case frepo_command_sync:
 			ret = frepo_sync(
@@ -875,7 +960,8 @@ int main(int argc, char* argv[])
 				manifest_path,
 				force, branch,
 				settings->group,
-				settings->group_count);
+				settings->group_count,
+				threads);
 			break;
 		case frepo_command_snapshot:
 			ret = frepo_snapshot(

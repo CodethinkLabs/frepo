@@ -55,6 +55,7 @@ typedef struct
 	project_t* project;
 	unsigned   project_count;
 	xml_tag_t* document;
+	long int   threads;
 } manifest_t;
 
 

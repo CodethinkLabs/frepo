@@ -89,6 +89,7 @@ manifest_t* manifest_parse(xml_tag_t* document)
 	manifest->project_count = project_count;
 	manifest->project = (project_t*)&manifest->remote[manifest->remote_count];
 	manifest->document = NULL;
+	manifest->threads = 1;
 
 	unsigned j;
 	for (i = 0, j = 0; i < mdoc->tag_count; i++)
@@ -123,6 +124,12 @@ manifest_t* manifest_parse(xml_tag_t* document)
 				= xml_tag_field(mdoc->tag[i], "revision");
 			if (nrevision)
 				default_revision = nrevision;
+
+			const char* sync_j
+				= xml_tag_field(mdoc->tag[i], "sync-j");
+			long int threads = strtol(sync_j, NULL, 0);
+			if (threads > 0)
+				manifest->threads = threads;
 
 			const char* nremote
 				= xml_tag_field(mdoc->tag[i], "remote");
