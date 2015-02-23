@@ -32,6 +32,7 @@
 
 #include "git.h"
 #include "xml.h"
+#include "path.h"
 #include "manifest.h"
 #include "settings.h"
 
@@ -127,23 +128,15 @@ static void* frepo_sync_manifest__thread(void* param)
 				}
 			}
 
-			char remote_full[strlen(tp->manifest_url) + 1
-				+ strlen(tp->manifest->project[p].remote) + 1];
-			if (tp->manifest->project[p].remote[0] == '.')
-			{
-				if (!tp->manifest_url)
-				{
-					fprintf(stderr,
-						"Error: Failed to create relative repo url"
-							", since manifest url is unknown.");
-					continue;
-				}
-				sprintf(remote_full, "%s/%s", tp->manifest_url,
+			char* remote_full
+				= path_join(tp->manifest_url,
 					tp->manifest->project[p].remote);
-			}
-			else
+			if (!remote_full)
 			{
-				strcpy(remote_full, tp->manifest->project[p].remote);
+				fprintf(stderr,
+					"Error: Failed to create relative repo url"
+						", since manifest url is unknown.");
+				continue;
 			}
 
 			if (!git_update(
@@ -157,6 +150,7 @@ static void* frepo_sync_manifest__thread(void* param)
 					(exists ? "update" : "clone"),
 					tp->manifest->project[p].path);
 			}
+			free(remote_full);
 
 			unsigned j;
 			for (j = 0; j < tp->manifest->project[p].copyfile_count; j++)

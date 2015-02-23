@@ -13,4 +13,6 @@ frepo_SOURCES = \
 	src/settings.c \
 	src/settings.h \
 	src/xml.c \
-	src/xml.h
+	src/xml.h \
+	src/path.c \
+	src/path.h
