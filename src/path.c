@@ -51,6 +51,8 @@ char* path_join(const char* base, const char* path)
 	strcpy(nbase, base);
 	char* pbase = nbase;
 
+	pbase = dirname(pbase);
+
 	while(path[0] == '.')
 	{
 		if (path[1] == '/')
