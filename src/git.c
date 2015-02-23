@@ -32,6 +32,13 @@
 
 
 
+static int system_silent(const char* command)
+{
+	char command_silent[strlen(command) + 13];
+	sprintf(command_silent, "%s > /dev/null", command);
+	return system(command_silent);
+}
+
 static bool git__command(const char* path, const char* command)
 {
 	if (!path || !command)
@@ -43,7 +50,7 @@ static bool git__command(const char* path, const char* command)
 	if (chdir(path) != 0)
 		return false;
 
-	bool ret = (system(command) == EXIT_SUCCESS);
+	bool ret = (system_silent(command) == EXIT_SUCCESS);
 	assert(chdir(pdir) == 0);
 	return ret;
 }
@@ -80,7 +87,7 @@ bool git_remove(const char* path)
 	if (!path) return false;
 	char cmd[strlen(path) + 64];
 	sprintf(cmd, "rm -rf %s", path);
-	return (system(cmd) == 0);
+	return (system_silent(cmd) == 0);
 }
 
 bool git_exists(const char* path)
@@ -88,7 +95,7 @@ bool git_exists(const char* path)
 	if (!path) return false;
 	char cmd[strlen(path) + 64];
 	sprintf(cmd, "[ -d %s/.git ]", path);
-	return (system(cmd) == EXIT_SUCCESS);
+	return (system_silent(cmd) == EXIT_SUCCESS);
 }
 
 bool git_checkout(const char* path, const char* revision, bool create)
@@ -189,7 +196,7 @@ bool git_update(
 			strcat(cmd, " ");
 			strcat(cmd, revision);
 
-			checkout_revision = (system(cmd) != EXIT_SUCCESS);
+			checkout_revision = (system_silent(cmd) != EXIT_SUCCESS);
 		}
 
 		sprintf(cmd, "git clone %s", remote);
@@ -224,7 +231,7 @@ bool git_update(
 		if (mirror)
 			strcat(cmd, " --mirror");
 
-		if (system(cmd) != EXIT_SUCCESS)
+		if (system_silent(cmd) != EXIT_SUCCESS)
 			return false;
 
 		if (mirror || !revision)
@@ -291,9 +298,9 @@ bool git_uncomitted_changes(const char* path, bool* changed)
 		return false;
 
 	bool unstaged
-		= (system("git diff --quiet --exit-code") != EXIT_SUCCESS);
+		= (system_silent("git diff --quiet --exit-code") != EXIT_SUCCESS);
 	bool uncommitted
-		= (system("git diff --cached --quiet --exit-code") != EXIT_SUCCESS);
+		= (system_silent("git diff --cached --quiet --exit-code") != EXIT_SUCCESS);
 
 	*changed = (unstaged || uncommitted);
 
