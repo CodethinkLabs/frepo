@@ -112,6 +112,30 @@ bool settings_manifest_name_set(
 	return true;
 }
 
+bool settings_manifest_url_set(
+	settings_t* settings, const char* url)
+{
+	if (!settings)
+		return false;
+
+	if (!url)
+	{
+		if (settings->manifest_url)
+			free(settings->manifest_url);
+		settings->manifest_url = NULL;
+	}
+	else
+	{
+		size_t rlen = strlen(url) + 1;
+		char* nurl = (char*)malloc(rlen);
+		if (!nurl) return false;
+		memcpy(nurl, url, rlen);
+		settings->manifest_url = nurl;
+	}
+
+	return true;
+}
+
 
 
 const char* settings_manifest_path_get(settings_t* settings)
@@ -133,6 +157,12 @@ const char* settings_manifest_path_get(settings_t* settings)
 	}
 
 	return (const char*)settings->manifest_path;
+}
+
+const char* settings_manifest_url_get(
+	settings_t* settings)
+{
+	return (const char*)settings->manifest_url;
 }
 
 
@@ -183,6 +213,13 @@ settings_t* settings_read(const char* path)
 			if (value[0] == '\0')
 				continue;
 			settings_manifest_name_set(
+				settings, value);
+		}
+		else if (strncmp(sline, "manifest-url", 12) == 0)
+		{
+			if (value[0] == '\0')
+				continue;
+			settings_manifest_url_set(
 				settings, value);
 		}
 		else if (strncmp(sline, "mirror", 6) == 0)

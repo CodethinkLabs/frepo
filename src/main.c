@@ -60,6 +60,7 @@ void print_usage(const char* prog)
 
 struct manifest_thread_params
 {
+	const char* manifest_url;
 	manifest_t* manifest;
 	bool        mirror;
 
@@ -126,9 +127,28 @@ static void* frepo_sync_manifest__thread(void* param)
 				}
 			}
 
+			char remote_full[strlen(tp->manifest_url) + 1
+				+ strlen(tp->manifest->project[p].remote) + 1];
+			if (tp->manifest->project[p].remote[0] == '.')
+			{
+				if (!tp->manifest_url)
+				{
+					fprintf(stderr,
+						"Error: Failed to create relative repo url"
+							", since manifest url is unknown.");
+					continue;
+				}
+				sprintf(remote_full, "%s/%s", tp->manifest_url,
+					tp->manifest->project[p].remote);
+			}
+			else
+			{
+				strcpy(remote_full, tp->manifest->project[p].remote);
+			}
+
 			if (!git_update(
 				tp->manifest->project[p].path,
-				tp->manifest->project[p].remote,
+				remote_full,
 				tp->manifest->project[p].name,
 				tp->manifest->project[p].remote_name,
 				tp->manifest->project[p].revision, tp->mirror))
@@ -177,13 +197,16 @@ static void* frepo_sync_manifest__thread(void* param)
 	return NULL;
 }
 
-static bool frepo_sync_manifest(manifest_t* manifest, bool mirror, long int threads)
+static bool frepo_sync_manifest(
+	manifest_t* manifest, const char* url,
+	bool mirror, long int threads)
 {
 	if (!manifest)
 		return false;
 
 	struct manifest_thread_params tp =
 	{
+		.manifest_url   = url,
 		.manifest       = manifest,
 		.mirror         = mirror,
 		.done           = 0,
@@ -209,9 +232,11 @@ static bool frepo_sync_manifest(manifest_t* manifest, bool mirror, long int thre
 	return true;
 }
 
-static int frepo_init(manifest_t* manifest, bool mirror, long int threads)
+static int frepo_init(
+	manifest_t* manifest, const char* url,
+	bool mirror, long int threads)
 {
-	return (frepo_sync_manifest(manifest, mirror, threads)
+	return (frepo_sync_manifest(manifest, url, mirror, threads)
 		? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
@@ -219,6 +244,7 @@ static int frepo_sync(
 	manifest_t* manifest,
 	const char* manifest_repo,
 	const char* manifest_path,
+	const char* manifest_url,
 	bool force, const char* branch,
 	group_t* group, unsigned group_count,
 	long int threads)
@@ -385,7 +411,7 @@ static int frepo_sync(
 			}
 		}
 
-		if (!frepo_sync_manifest(manifest_updated, false, threads))
+		if (!frepo_sync_manifest(manifest_updated, manifest_url, false, threads))
 			return EXIT_FAILURE;
 	}
 
@@ -814,8 +840,18 @@ int main(int argc, char* argv[])
 
 	if (command == frepo_command_init)
 	{
+		if (!settings_manifest_url_set(
+			settings, repo))
+		{
+			fprintf(stderr,
+				"Error: Failed to set repository URL.\n");
+			return EXIT_FAILURE;
+		}
+
+		char brepo[strlen(repo) + 1];
+		strcpy(brepo, repo);
 		if (!settings_manifest_repo_set(
-			settings, basename((char*)repo)))
+			settings, basename(brepo)))
 		{
 			fprintf(stderr,
 				"Error: Failed to set repository name from URL.\n");
@@ -951,13 +987,16 @@ int main(int argc, char* argv[])
 	switch (command)
 	{
 		case frepo_command_init:
-			ret = frepo_init(manifest, settings->mirror, threads);
+			ret = frepo_init(
+				manifest, settings->manifest_url,
+				settings->mirror, threads);
 			break;
 		case frepo_command_sync:
 			ret = frepo_sync(
 				manifest,
 				settings->manifest_repo,
 				manifest_path,
+				settings->manifest_url,
 				force, branch,
 				settings->group,
 				settings->group_count,
