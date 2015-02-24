@@ -126,6 +126,14 @@ bool git_update(
 	const char* remote, const char* remote_path, const char* remote_name,
 	const char* revision, bool mirror)
 {
+	if (revision)
+	{
+		if (strncmp(revision, "refs/heads/", 11) == 0)
+			revision = &revision[11];
+		else if (strncmp(revision, "refs/tags/", 10) == 0)
+			revision = &revision[10];
+	}
+
 	const char* full_path = path;
 	char auto_path[(remote ? strlen(remote) : 0)
 		+ (remote_path ? strlen(remote_path) + 1 : 0) + 1];
@@ -184,7 +192,7 @@ bool git_update(
 		bool checkout_revision = false;
 		if (revision)
 		{
-			sprintf(cmd, "git ls-remote --heads --exit-code %s", remote);
+			sprintf(cmd, "git ls-remote --heads --tags --exit-code %s", remote);
 
 			if (remote_path)
 			{
@@ -235,6 +243,8 @@ bool git_update(
 			return false;
 
 		if (mirror || !revision)
+			return true;
+		if (revision && !checkout_revision)
 			return true;
 	}
 	else if (mirror)
