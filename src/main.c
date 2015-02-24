@@ -64,130 +64,125 @@ struct manifest_thread_params
 	const char* manifest_url;
 	manifest_t* manifest;
 	bool        mirror;
+	sem_t*      semaphore;
 
-	sem_t           done_semaphore;
-	pthread_mutex_t done_mutex;
-	unsigned        done;
-
-	long int  threads_dead;
-	long int* threads;
+	pthread_t   thread;
+	unsigned    project;
+	bool*       error;
+	bool        complete;
 };
 
 static void* frepo_sync_manifest__thread(void* param)
 {
-	struct manifest_thread_params* tp
-		= (struct manifest_thread_params*)param;
+	volatile struct manifest_thread_params* tp
+		= (volatile struct manifest_thread_params*)param;
 
-	while (true)
+	unsigned p = tp->project;
+
+	bool exists = git_exists(tp->manifest->project[p].path);
+
+	printf("%s repository (%u/%u) '%s'.\n",
+		(exists ? "Updating" : "Cloning"),
+		(p + 1), tp->manifest->project_count,
+		tp->manifest->project[p].path);
+
+	char* revision = NULL;
+	bool revision_differs = false;
+
+	if (exists && !tp->mirror)
 	{
-		assert(pthread_mutex_lock(&tp->done_mutex) == 0);
-		if (tp->done >= tp->manifest->project_count)
+		revision = git_current_branch(
+			tp->manifest->project[p].path);
+		if (!revision)
 		{
-			tp->threads_dead++;
-			assert(pthread_mutex_unlock(&tp->done_mutex) == 0);
-			if (tp->threads_dead == *tp->threads)
-				sem_post(&tp->done_semaphore);
-			pthread_exit(NULL);
-		}
-		unsigned p = tp->done++;
-		assert(pthread_mutex_unlock(&tp->done_mutex) == 0);
-
-		{
-			bool exists = git_exists(tp->manifest->project[p].path);
-
-			printf("%s repository (%u/%u) '%s'.\n",
-				(exists ? "Updating" : "Cloning"),
-				(p + 1), tp->manifest->project_count,
+			fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
 				tp->manifest->project[p].path);
+			*(tp->error) = true;
+			sem_post(tp->semaphore);
+			return NULL;
+		}
 
-			char* revision = NULL;
-			bool revision_differs = false;
-
-			if (exists && !tp->mirror)
-			{
-				revision = git_current_branch(
-					tp->manifest->project[p].path);
-				if (!revision)
-				{
-					fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
-						tp->manifest->project[p].path);
-					continue;
-				}
-
-				revision_differs
-					= (strcmp(revision, tp->manifest->project[p].revision) != 0);
-				if (revision_differs && !git_checkout(
-					tp->manifest->project[p].path,
-					tp->manifest->project[p].revision, false))
-				{
-					free(revision);
-					fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
-						tp->manifest->project[p].revision,
-						tp->manifest->project[p].path);
-					continue;
-				}
-			}
-
-			char* remote_full
-				= path_join(tp->manifest_url,
-					tp->manifest->project[p].remote);
-			if (!remote_full)
-			{
-				fprintf(stderr,
-					"Error: Failed to create relative repo url"
-						", since manifest url is unknown.");
-				continue;
-			}
-
-			if (!git_update(
-				tp->manifest->project[p].path,
-				remote_full,
-				tp->manifest->project[p].name,
-				tp->manifest->project[p].remote_name,
-				tp->manifest->project[p].revision, tp->mirror))
-			{
-				fprintf(stderr, "Error: Failed to %s '%s'.\n",
-					(exists ? "update" : "clone"),
-					tp->manifest->project[p].path);
-			}
-			free(remote_full);
-
-			unsigned j;
-			for (j = 0; j < tp->manifest->project[p].copyfile_count; j++)
-			{
-				char cmd[strlen(tp->manifest->project[p].path)
-					+ strlen(tp->manifest->project[p].copyfile[j].source)
-					+ strlen(tp->manifest->project[p].copyfile[j].dest) + 16];
-				sprintf(cmd, "cp %s/%s %s",
-					tp->manifest->project[p].path,
-					tp->manifest->project[p].copyfile[j].source,
-					tp->manifest->project[p].copyfile[j].dest);
-				if (system(cmd) != EXIT_SUCCESS)
-				{
-					unsigned k;
-					for (k = 0; k < j; k++)
-						git_remove(tp->manifest->project[k].path);
-					fprintf(stderr,
-						"Error: Failed to perform copy '%s' to '%s'"
-						" for project '%s'\n",
-						tp->manifest->project[p].copyfile[j].source,
-						tp->manifest->project[p].copyfile[j].dest,
-						tp->manifest->project[p].path);
-				}
-			}
-
-			if (revision_differs && !git_checkout(
-				tp->manifest->project[p].path,
-				revision, false))
-			{
-				fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
-					tp->manifest->project[p].path, revision);
-			}
-
+		revision_differs
+			= (strcmp(revision, tp->manifest->project[p].revision) != 0);
+		if (revision_differs && !git_checkout(
+			tp->manifest->project[p].path,
+			tp->manifest->project[p].revision, false))
+		{
 			free(revision);
+			fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
+				tp->manifest->project[p].revision,
+				tp->manifest->project[p].path);
+			*(tp->error) = true;
+			sem_post(tp->semaphore);
+			return NULL;
 		}
 	}
 
+	char* remote_full
+		= path_join(tp->manifest_url,
+			tp->manifest->project[p].remote);
+	if (!remote_full)
+	{
+		fprintf(stderr,
+			"Error: Failed to create relative repo url"
+				", since manifest url is unknown.");
+		*(tp->error) = true;
+		sem_post(tp->semaphore);
+		return NULL;
+	}
+
+	if (!git_update(
+		tp->manifest->project[p].path,
+		remote_full,
+		tp->manifest->project[p].name,
+		tp->manifest->project[p].remote_name,
+		tp->manifest->project[p].revision, tp->mirror))
+	{
+		fprintf(stderr, "Error: Failed to %s '%s'.\n",
+			(exists ? "update" : "clone"),
+			tp->manifest->project[p].path);
+		*(tp->error) = true;
+	}
+	free(remote_full);
+
+	unsigned j;
+	for (j = 0; j < tp->manifest->project[p].copyfile_count; j++)
+	{
+		char cmd[strlen(tp->manifest->project[p].path)
+			+ strlen(tp->manifest->project[p].copyfile[j].source)
+			+ strlen(tp->manifest->project[p].copyfile[j].dest) + 16];
+		sprintf(cmd, "cp %s/%s %s",
+			tp->manifest->project[p].path,
+			tp->manifest->project[p].copyfile[j].source,
+			tp->manifest->project[p].copyfile[j].dest);
+		if (system(cmd) != EXIT_SUCCESS)
+		{
+			unsigned k;
+			for (k = 0; k < j; k++)
+				git_remove(tp->manifest->project[k].path);
+			fprintf(stderr,
+				"Error: Failed to perform copy '%s' to '%s'"
+				" for project '%s'\n",
+				tp->manifest->project[p].copyfile[j].source,
+				tp->manifest->project[p].copyfile[j].dest,
+				tp->manifest->project[p].path);
+			*(tp->error) = true;
+		}
+	}
+
+	if (revision_differs && !git_checkout(
+		tp->manifest->project[p].path,
+		revision, false))
+	{
+		fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
+			tp->manifest->project[p].path, revision);
+		*(tp->error) = true;
+	}
+
+	free(revision);
+
+	tp->complete = true;
+	sem_post(tp->semaphore);
 	return NULL;
 }
 
@@ -198,30 +193,92 @@ static bool frepo_sync_manifest(
 	if (!manifest)
 		return false;
 
-	struct manifest_thread_params tp =
-	{
-		.manifest_url   = url,
-		.manifest       = manifest,
-		.mirror         = mirror,
-		.done           = 0,
-		.threads_dead   = 0,
-		.threads        = &threads,
-	};
-	assert(sem_init(&tp.done_semaphore, 0, 0) >= 0);
-	assert(pthread_mutex_init(&tp.done_mutex, NULL) == 0);
+	if (manifest->project_count == 0)
+		return true;
 
-	pthread_t thread[threads];
+	if (threads <= 0)
+		threads = 1;
+	if ((unsigned)threads > manifest->project_count)
+		threads = manifest->project_count;
+
+	sem_t semaphore;
+	assert(sem_init(&semaphore, 0, 0) >= 0);
+
+	volatile struct manifest_thread_params tp[threads];
+	long int i;
+	for (i = 0; i < threads; i++)
+	{
+		tp[i].manifest_url = url;
+		tp[i].manifest     = manifest;
+		tp[i].mirror       = mirror;
+		tp[i].semaphore    = &semaphore;
+	}
+
+	unsigned p = 0;
+	unsigned error_count = 0;
+	bool error[manifest->project_count];
 
 	long int t;
 	for (t = 0; t < threads; t++)
 	{
-		assert(pthread_create(&thread[t], NULL,
-			frepo_sync_manifest__thread, &tp) == 0);
+		error[p] = false;
+		tp[t].project  = p;
+		tp[t].error    = &error[p];
+		tp[t].complete = false;
+		assert(pthread_create(
+			(void*)&tp[t].thread, NULL,
+			frepo_sync_manifest__thread,
+			(void*)&tp[t]) == 0);
+		p++;
 	}
 
-	sem_wait(&tp.done_semaphore);
-	pthread_mutex_destroy(&tp.done_mutex);
-	sem_destroy(&tp.done_semaphore);
+	while (p < manifest->project_count)
+	{
+		sem_wait(&semaphore);
+
+		do
+		{
+			for (t = 0; t < threads; t++)
+			{
+				if (*tp[t].error || tp[t].complete)
+				{
+					error_count += (*tp[t].error ? 1 : 0);
+					break;
+				}
+			}
+		} while (t >= threads);
+
+		error[p] = false;
+		tp[t].project  = p;
+		tp[t].error    = &error[p];
+		tp[t].complete = false;
+		assert(pthread_create(
+			(void*)&tp[t].thread, NULL,
+			frepo_sync_manifest__thread,
+			(void*)&tp[t]) == 0);
+		p++;
+	}
+
+	for (t = 0; t < threads; t++)
+		sem_wait(&semaphore);
+	sem_destroy(&semaphore);
+
+	for (t = 0; t < threads; t++)
+	{
+		if (tp[t].error || tp[t].complete)
+			error_count += (*tp[t].error ? 1 : 0);
+	}
+
+	if (error_count != 0)
+	{
+		for (p = 0; p < manifest->project_count; p++)
+		{
+			if (error[p])
+				fprintf(stderr, "Error: Failed to sync project '%s'.\n",
+					manifest->project[p].path);
+		}
+		return false;
+	}
 
 	return true;
 }
