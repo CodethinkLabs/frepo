@@ -68,7 +68,7 @@ bool git_reset_hard(const char* path, const char* commit)
 bool git_fetch(const char* path, const char* remote)
 {
 	char cmd[(remote ? strlen(remote) : 0) + 64];
-	strcpy(cmd, "git fetch");
+	strcpy(cmd, "git fetch --quiet");
 	if (remote)
 	{
 		strcat(cmd, " ");
@@ -104,7 +104,7 @@ bool git_checkout(const char* path, const char* revision, bool create)
 		return false;
 
 	char cmd[strlen(revision) + 64];
-	strcpy(cmd, "git checkout ");
+	strcpy(cmd, "git checkout --quiet ");
 	if (create)
 		strcat(cmd, "-b ");
 	strcat(cmd, revision);
@@ -117,7 +117,7 @@ bool git_commit(const char* path, const char* message)
 		return false;
 
 	char cmd[strlen(message) + 64];
-	sprintf(cmd, "git commit -a -m \"%s\"", message);
+	sprintf(cmd, "git commit --quiet -a -m \"%s\"", message);
 	return git__command(path, cmd);
 }
 
@@ -207,7 +207,7 @@ bool git_update(
 			checkout_revision = (system_silent(cmd) != EXIT_SUCCESS);
 		}
 
-		sprintf(cmd, "git clone %s", remote);
+		sprintf(cmd, "git clone --quiet %s", remote);
 
 		if (remote_path)
 		{
