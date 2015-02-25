@@ -178,7 +178,8 @@ bool git_update(
 	if (full_path[0] == '\0')
 		return false;
 
-	if (!git_exists(full_path))
+	bool created = !git_exists(full_path);
+	if (created)
 	{
 		if (!remote)
 			return false;
@@ -255,23 +256,15 @@ bool git_update(
 	{
 		full_revision = git_current_branch(full_path);
 		if (!full_revision)
-			return false;
+			goto git_update_fail;
 	}
 
 	if (!git_fetch(full_path, remote_name))
-	{
-		if (full_revision != revision)
-			free(full_revision);
-		return false;
-	}
+		goto git_update_fail;
 
 	bool is_branch;
 	if (!git_revision_is_branch(full_path, full_revision, &is_branch))
-	{
-		if (full_revision != revision)
-			free(full_revision);
-		return false;
-	}
+		goto git_update_fail;
 
 	bool success = (is_branch
 		? git_pull(full_path)
@@ -280,6 +273,13 @@ bool git_update(
 	if (full_revision != revision)
 		free(full_revision);
 	return success;
+
+git_update_fail:
+	if (full_revision != revision)
+		free(full_revision);
+	if (created)
+		git_remove(full_path);
+	return false;
 }
 
 
