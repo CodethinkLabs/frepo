@@ -65,6 +65,8 @@ struct manifest_thread_params
 	manifest_t* manifest;
 	bool        mirror;
 	sem_t*      semaphore;
+	unsigned    retries;
+	unsigned    retry_delay;
 
 	pthread_t   thread;
 	unsigned    project;
@@ -131,16 +133,41 @@ static void* frepo_sync_manifest__thread(void* param)
 		return NULL;
 	}
 
-	if (!git_update(
+	bool update_success = git_update(
 		tp->manifest->project[p].path,
 		remote_full,
 		tp->manifest->project[p].name,
 		tp->manifest->project[p].remote_name,
-		tp->manifest->project[p].revision, tp->mirror))
+		tp->manifest->project[p].revision, tp->mirror);
+
+	unsigned r, d;
+	for (r = 0, d = tp->retry_delay;
+		!update_success && (r < tp->retries);
+		r++, d *= 2)
 	{
-		fprintf(stderr, "Error: Failed to %s '%s'.\n",
+		fprintf(stderr, "Warning: Failed to %s '%s'"
+			", waiting %u ms and retrying.\n",
+			(exists ? "update" : "clone"),
+			tp->manifest->project[p].path, d);
+
+		usleep(tp->retry_delay * 1000);
+
+		update_success = git_update(
+			tp->manifest->project[p].path,
+			remote_full,
+			tp->manifest->project[p].name,
+			tp->manifest->project[p].remote_name,
+			tp->manifest->project[p].revision, tp->mirror);
+	}
+
+	if (!update_success)
+	{
+		fprintf(stderr, "Error: Failed to %s '%s'",
 			(exists ? "update" : "clone"),
 			tp->manifest->project[p].path);
+		if (tp->retries != 0)
+			fprintf(stderr, " after %u retries", tp->retries);
+		fprintf(stderr, ".\n");
 		*(tp->error) = true;
 	}
 	free(remote_full);
@@ -212,6 +239,8 @@ static bool frepo_sync_manifest(
 		tp[i].manifest     = manifest;
 		tp[i].mirror       = mirror;
 		tp[i].semaphore    = &semaphore;
+		tp[i].retries      = 4;
+		tp[i].retry_delay  = 100;
 	}
 
 	unsigned p = 0;
