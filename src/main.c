@@ -909,13 +909,12 @@ int main(int argc, char* argv[])
 			return EXIT_FAILURE;
 		}
 
-		if (mkdir(name, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0)
+		char mkdir_cmd[strlen(name) + 64];
+		sprintf(mkdir_cmd, "mkdir -p %s > /dev/null", name);
+		if (system(mkdir_cmd) != EXIT_SUCCESS)
 		{
-			if (errno != EEXIST)
-			{
-				fprintf(stderr, "Error: Failed to create '%s' directory.\n", name);
-				return EXIT_FAILURE;
-			}
+			fprintf(stderr, "Error: Failed to create '%s' directory.\n", name);
+			return EXIT_FAILURE;
 		}
 
 		if (chdir(name) != 0)
