@@ -239,7 +239,7 @@ static bool frepo_sync_manifest(
 		tp[i].manifest     = manifest;
 		tp[i].mirror       = mirror;
 		tp[i].semaphore    = &semaphore;
-		tp[i].retries      = 4;
+		tp[i].retries      = 8;
 		tp[i].retry_delay  = 100;
 	}
 
