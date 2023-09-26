@@ -348,7 +348,7 @@ static int frepo_sync(
 	}
 
 	bool manifest_uncommitted_changes;
-	if (!git_uncomitted_changes(manifest_repo, &manifest_uncommitted_changes))
+	if (!git_uncommitted_changes(manifest_repo, &manifest_uncommitted_changes))
 	{
 		fprintf(stderr, "Error: Failed to check for uncommitted changes"
 			" in your manifest.\n");
@@ -443,7 +443,7 @@ static int frepo_sync(
 			for (i = 0; i < manifest_old->project_count; i++)
 			{
 				bool uncommitted_changes;
-				if (!git_uncomitted_changes(
+				if (!git_uncommitted_changes(
 					manifest_old->project[i].path, &uncommitted_changes))
 				{
 					fprintf(stderr, "Error: '%s' is deprecated but can't remove"
@@ -479,7 +479,7 @@ static int frepo_sync(
 				continue;
 
 			bool uncommitted_changes;
-			if (!git_uncomitted_changes(
+			if (!git_uncommitted_changes(
 				manifest_updated->project[i].path, &uncommitted_changes))
 			{
 				fprintf(stderr, "Error: Failed to check for uncommitted changes"
@@ -547,7 +547,7 @@ static int frepo_snapshot(
 	const char* name)
 {
 	bool changes;
-	if (!git_uncomitted_changes(manifest_repo, &changes))
+	if (!git_uncommitted_changes(manifest_repo, &changes))
 	{
 		fprintf(stderr, "Error: Failed to check for uncommitted changes to manifest.\n");
 		return EXIT_FAILURE;
