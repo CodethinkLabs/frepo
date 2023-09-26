@@ -932,8 +932,8 @@ int main(int argc, char* argv[])
 			return EXIT_FAILURE;
 		}
 
-		char brepo[strlen(repo) + 1];
-		strcpy(brepo, repo);
+		char brepo[strlen(settings->manifest_repo) + 1];
+		strcpy(brepo, settings->manifest_repo);
 		if (!settings_manifest_repo_set(
 			settings, basename(brepo)))
 		{
