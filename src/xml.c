@@ -236,10 +236,12 @@ unsigned xml__parse_tag(const char* source, xml_tag_t** tag)
 	xml_tag_t* ntag = xml__tag_create(nstr, NULL);
 	if (!ntag) return 0;
 
-	xml_field_t* field;
-	unsigned     field_length;
-	while (field_length = xml__parse_field(&source[i], &field))
+	while (true)
 	{
+		xml_field_t* field;
+		unsigned field_length = xml__parse_field(&source[i], &field);
+		if (field_length == 0) break;
+
 		if (!xml__tag_append_field(ntag, field))
 		{
 			free(field);
@@ -264,10 +266,12 @@ unsigned xml__parse_tag(const char* source, xml_tag_t** tag)
 
 	if (!empty)
 	{
-		xml_tag_t* ctag;
-		unsigned   ctag_length;
-		while (ctag_length = xml__parse_tag(&source[i], &ctag))
+		while (true)
 		{
+			xml_tag_t* ctag;
+			unsigned ctag_length = xml__parse_tag(&source[i], &ctag);
+			if (ctag_length == 0) break;
+
 			if (!xml__tag_insert_tag(ntag, ctag))
 			{
 				xml_tag_delete(ctag);
@@ -313,10 +317,12 @@ xml_tag_t* xml_document_parse(const char* source)
 	{
 		i += 5;
 
-		xml_field_t* field;
-		unsigned     field_length;
-		while (field_length = xml__parse_field(&source[i], &field))
+		while (true)
 		{
+			xml_field_t* field;
+			unsigned field_length = xml__parse_field(&source[i], &field);
+			if (field_length == 0) break;
+
 			if (!xml__tag_append_field(document, field))
 			{
 				free(field);
@@ -337,10 +343,12 @@ xml_tag_t* xml_document_parse(const char* source)
 		i += xml__parse_whitespace(&source[i]);
 	}
 
-	xml_tag_t* tag;
-	unsigned   tag_length;
-	while (tag_length = xml__parse_tag(&source[i], &tag))
+	while (true)
 	{
+		xml_tag_t* tag;
+		unsigned tag_length = xml__parse_tag(&source[i], &tag);
+		if (tag_length == 0) break;
+
 		if (!xml__tag_insert_tag(document, tag))
 		{
 			xml_tag_delete(tag);

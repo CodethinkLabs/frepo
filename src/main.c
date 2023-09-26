@@ -28,7 +28,6 @@
 #include <libgen.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <assert.h>
 
 #include "git.h"
 #include "xml.h"
@@ -229,7 +228,8 @@ static bool frepo_sync_manifest(
 		threads = manifest->project_count;
 
 	sem_t semaphore;
-	assert(sem_init(&semaphore, 0, 0) >= 0);
+	if (sem_init(&semaphore, 0, 0) < 0)
+		abort();
 
 	volatile struct manifest_thread_params tp[threads];
 	long int i;
@@ -254,10 +254,12 @@ static bool frepo_sync_manifest(
 		tp[t].project  = p;
 		tp[t].error    = &error[p];
 		tp[t].complete = false;
-		assert(pthread_create(
+
+		if (pthread_create(
 			(void*)&tp[t].thread, NULL,
 			frepo_sync_manifest__thread,
-			(void*)&tp[t]) == 0);
+			(void*)&tp[t]) != 0)
+			abort();
 		p++;
 	}
 
@@ -281,10 +283,12 @@ static bool frepo_sync_manifest(
 		tp[t].project  = p;
 		tp[t].error    = &error[p];
 		tp[t].complete = false;
-		assert(pthread_create(
+
+		if (pthread_create(
 			(void*)&tp[t].thread, NULL,
 			frepo_sync_manifest__thread,
-			(void*)&tp[t]) == 0);
+			(void*)&tp[t]) != 0)
+			abort();
 		p++;
 	}
 
@@ -703,6 +707,14 @@ int main(int argc, char* argv[])
 		return EXIT_FAILURE;
 	}
 
+	if ((strcmp(argv[1], "help") == 0)
+		|| (strcmp(argv[1], "-h") == 0)
+		|| (strcmp(argv[1], "--help") == 0))
+	{
+		print_usage(argv[0]);
+		return EXIT_SUCCESS;
+	}
+
 	frepo_command_e command;
 	if (strcmp(argv[1], "init") == 0)
 		command = frepo_command_init;
@@ -928,8 +940,8 @@ int main(int argc, char* argv[])
 			return EXIT_FAILURE;
 		}
 
-		char brepo[strlen(repo) + 1];
-		strcpy(brepo, repo);
+		char brepo[strlen(settings->manifest_repo) + 1];
+		strcpy(brepo, settings->manifest_repo);
 		if (!settings_manifest_repo_set(
 			settings, basename(brepo)))
 		{
