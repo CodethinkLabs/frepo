@@ -28,8 +28,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include <assert.h>
-
 
 
 static int system_silent(const char* command)
@@ -51,7 +49,8 @@ static bool git__command(const char* path, const char* command)
 		return false;
 
 	bool ret = (system_silent(command) == EXIT_SUCCESS);
-	assert(chdir(pdir) == 0);
+	if (chdir(pdir) != 0)
+		abort();
 	return ret;
 }
 
@@ -312,7 +311,8 @@ bool git_uncomitted_changes(const char* path, bool* changed)
 
 	*changed = (unstaged || uncommitted);
 
-	assert(chdir(pdir) == 0);
+	if (chdir(pdir) != 0)
+		abort();
 	return true;
 }
 
@@ -375,7 +375,8 @@ char* git_current_branch(const char* path)
 		branch = git__pipe_read("git rev-parse HEAD");
 	}
 
-	assert(chdir(pdir) == 0);
+	if (chdir(pdir) != 0)
+		abort();
 	return branch;
 }
 
@@ -391,6 +392,7 @@ char* git_current_commit(const char* path)
 
 	char* commit
 		= git__pipe_read("git rev-parse HEAD");
-	assert(chdir(pdir) == 0);
+	if (chdir(pdir) != 0)
+		abort();
 	return commit;
 }

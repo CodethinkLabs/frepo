@@ -28,7 +28,6 @@
 #include <libgen.h>
 #include <pthread.h>
 #include <semaphore.h>
-#include <assert.h>
 
 #include "git.h"
 #include "xml.h"
@@ -229,7 +228,8 @@ static bool frepo_sync_manifest(
 		threads = manifest->project_count;
 
 	sem_t semaphore;
-	assert(sem_init(&semaphore, 0, 0) >= 0);
+	if (sem_init(&semaphore, 0, 0) < 0)
+		abort();
 
 	volatile struct manifest_thread_params tp[threads];
 	long int i;
@@ -254,10 +254,12 @@ static bool frepo_sync_manifest(
 		tp[t].project  = p;
 		tp[t].error    = &error[p];
 		tp[t].complete = false;
-		assert(pthread_create(
+
+		if (pthread_create(
 			(void*)&tp[t].thread, NULL,
 			frepo_sync_manifest__thread,
-			(void*)&tp[t]) == 0);
+			(void*)&tp[t]) != 0)
+			abort();
 		p++;
 	}
 
@@ -281,10 +283,12 @@ static bool frepo_sync_manifest(
 		tp[t].project  = p;
 		tp[t].error    = &error[p];
 		tp[t].complete = false;
-		assert(pthread_create(
+
+		if (pthread_create(
 			(void*)&tp[t].thread, NULL,
 			frepo_sync_manifest__thread,
-			(void*)&tp[t]) == 0);
+			(void*)&tp[t]) != 0)
+			abort();
 		p++;
 	}
 
