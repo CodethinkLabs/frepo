@@ -223,8 +223,6 @@ bool git_update(
 			strcat(cmd, revision);
 		}
 
-		char auto_path[strlen(remote)
-			+ (remote_path ? strlen(remote_path) + 1 : 0) + 1];
 		if (path)
 		{
 			strcat(cmd, " ");
