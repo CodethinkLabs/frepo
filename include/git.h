@@ -35,7 +35,7 @@ extern bool git_update(
 	const char* revision, bool mirror);
 
 extern bool  git_revision_is_branch(const char* path, const char* revision, bool* is_branch);
-extern bool  git_uncomitted_changes(const char* path, bool* changed);
+extern bool  git_uncommitted_changes(const char* path, bool* changed);
 extern char* git_current_branch(const char* path);
 extern char* git_current_commit(const char* path);
 

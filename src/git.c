@@ -293,7 +293,7 @@ bool git_revision_is_branch(const char* path, const char* revision, bool* is_bra
 }
 
 
-bool git_uncomitted_changes(const char* path, bool* changed)
+bool git_uncommitted_changes(const char* path, bool* changed)
 {
 	if (!path || !changed)
 		return false;

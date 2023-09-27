@@ -45,7 +45,7 @@ typedef struct
 	copyfile_t* copyfile;
 	unsigned    copyfile_count;
 	group_t*    group;
-    unsigned    group_count;
+	unsigned    group_count;
 } project_t;
 
 typedef struct
