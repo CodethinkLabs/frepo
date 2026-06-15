@@ -299,6 +299,12 @@ manifest_t* manifest_read(const char* path)
 		return NULL;
 	}
 
+	if (manifest_stat.st_size < 0)
+	{
+		close(fd);
+		fprintf(stderr, "Error: File %s has negative size.\n", path);
+	}
+
 	char manifest_string[manifest_stat.st_size + 1];
 	if (read(fd, manifest_string, manifest_stat.st_size) < 0)
 	{
@@ -311,7 +317,7 @@ manifest_t* manifest_read(const char* path)
 	close(fd);
 
 	xml_tag_t* manifest_xml
-		= xml_document_parse(manifest_string);
+		= xml_document_parse(manifest_string, manifest_stat.st_size);
 	if (!manifest_xml)
 	{
 		fprintf(stderr, "Error: Failed to parse xml in manifest file.\n");

@@ -5,7 +5,7 @@ INCLUDE = -I include
 CFLAGS_COMMON = $(INCLUDE) -Wall -Wextra -Werror -MD -MP
 CFLAGS_RELEASE  = -DNDEBUG -O3 $(CFLAGS_COMMON)
 CFLAGS_DEBUG = -O0 -g $(CFLAGS_COMMON)
-LDFLAGS_DEBUG = -lm
+LDFLAGS_DEBUG = -lm -lexpat
 LDFLAGS_RELEASE = -s $(LDFLAGS_DEBUG)
 
 SRC = $(shell find src -type f)
