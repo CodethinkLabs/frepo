@@ -73,6 +73,22 @@ struct manifest_thread_params
 	bool        complete;
 };
 
+static int do_copyfile(
+	const char* cmd,
+	const char* path,
+	const char* source,
+	const char* dest)
+{
+	char buf[strlen(cmd)
+		+ strlen(path)
+		+ strlen(source)
+		+ strlen(dest) + 4];
+	sprintf(buf,
+		"%s %s/%s %s",
+		cmd, path, source, dest);
+	return system(buf);
+}
+
 static void* frepo_sync_manifest__thread(void* param)
 {
 	volatile struct manifest_thread_params* tp
@@ -176,14 +192,8 @@ static void* frepo_sync_manifest__thread(void* param)
 	for (j = 0; j < project->copyfile_count; j++)
 	{
 		copyfile_t* copyfile = &project->copyfile[j];
-		char cmd[strlen(project->path)
-			+ strlen(copyfile->source)
-			+ strlen(copyfile->dest) + 16];
-		sprintf(cmd, "cp %s/%s %s",
-			project->path,
-			copyfile->source,
-			copyfile->dest);
-		if (system(cmd) != EXIT_SUCCESS)
+		int res = do_copyfile("cp", project->path, copyfile->source, copyfile->dest);
+		if (res != EXIT_SUCCESS)
 		{
 			unsigned k;
 			for (k = 0; k < j; k++)
@@ -193,6 +203,29 @@ static void* frepo_sync_manifest__thread(void* param)
 				" for project '%s'\n",
 				copyfile->source,
 				copyfile->dest,
+				project->path);
+			*(tp->error) = true;
+		}
+	}
+
+	for (j = 0; j < project->linkfile_count; j++)
+	{
+		copyfile_t* linkfile = &project->linkfile[j];
+		int res = do_copyfile(
+			"ln --symbolic --relative",
+			project->path,
+			linkfile->source,
+			linkfile->dest);
+		if (res != EXIT_SUCCESS)
+		{
+			unsigned k;
+			for (k = 0; k < j; k++)
+				git_remove(project->path);
+			fprintf(stderr,
+				"Error: Failed to perform link '%s' to '%s'"
+				" for project '%s'\n",
+				linkfile->source,
+				linkfile->dest,
 				project->path);
 			*(tp->error) = true;
 		}
