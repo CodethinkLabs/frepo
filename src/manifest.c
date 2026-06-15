@@ -40,6 +40,7 @@ void manifest_delete(manifest_t* manifest)
 	for (i = 0; i < manifest->project_count; i++)
 	{
 		free(manifest->project[i].copyfile);
+		free(manifest->project[i].linkfile);
 		free(manifest->project[i].group);
 	}
 
@@ -203,54 +204,77 @@ manifest_t* manifest_parse(xml_tag_t* document)
 			project->copyfile_count = 0;
 			project->copyfile = NULL;
 
+			project->linkfile_count = 0;
+			project->linkfile = NULL;
+
 			project->group_count = 0;
 			project->group = NULL;
 
 			unsigned k;
 			for (k = 0; k < mdoc->tag[i]->tag_count; k++)
 			{
-				if (strcmp(mdoc->tag[i]->tag[k]->name, "copyfile") != 0)
+				const char* tag_name = mdoc->tag[i]->tag[k]->name;
+
+				const char *copyfile_kind;
+				copyfile_t** copyfile;
+				unsigned* copyfile_count;
+				if (strcmp(tag_name, "copyfile") == 0)
+				{
+					copyfile_kind = "copyfile";
+					copyfile = &project->copyfile;
+					copyfile_count = &project->copyfile_count;
+				}
+				else if (strcmp(tag_name, "linkfile") == 0)
+				{
+					copyfile_kind = "linkfile";
+					copyfile = &project->linkfile;
+					copyfile_count = &project->linkfile_count;
+				}
+				else
 				{
 					fprintf(stderr,
 						"Warning: Unknown project sub-tag '%s'.\n",
-						mdoc->tag[i]->tag[k]->name);
+						tag_name);
 					continue;
 				}
 
 				copyfile_t* ncopyfile
-					= (copyfile_t*)realloc(project->copyfile,
-						(project->copyfile_count + 1) * sizeof(copyfile_t));
+					= (copyfile_t*)realloc(*copyfile,
+						((*copyfile_count) + 1) * sizeof(copyfile_t));
 				if (!ncopyfile)
 				{
 					fprintf(stderr,
-						"Error: Failed to add copyfile to project.\n");
+						"Error: Failed to add %s to project.\n",
+						copyfile_kind);
 					manifest_delete(manifest);
 					return NULL;
 				}
 
-				project->copyfile = ncopyfile;
-				project->copyfile[project->copyfile_count].source
+				*copyfile = ncopyfile;
+				(*copyfile)[*copyfile_count].source
 					= xml_tag_field(mdoc->tag[i]->tag[k], "src");
-				project->copyfile[project->copyfile_count].dest
+				(*copyfile)[*copyfile_count].dest
 					= xml_tag_field(mdoc->tag[i]->tag[k], "dest");
 
-				if (!project->copyfile[project->copyfile_count].source)
+				if (!(*copyfile)[*copyfile_count].source)
 				{
 					fprintf(stderr,
-						"Error: Invalid copyfile tag, missing source field.\n");
+						"Error: Invalid %s tag, missing source field.\n",
+						copyfile_kind);
 					manifest_delete(manifest);
 					return NULL;
 				}
 
-				if (!project->copyfile[project->copyfile_count].dest)
+				if (!(*copyfile)[*copyfile_count].dest)
 				{
 					fprintf(stderr,
-						"Error: Invalid copyfile tag, missing dest field.\n");
+						"Error: Invalid %s tag, missing dest field.\n",
+						copyfile_kind);
 					manifest_delete(manifest);
 					return NULL;
 				}
 
-				project->copyfile_count++;
+				(*copyfile_count)++;
 			}
 
 			const char* groups
@@ -336,7 +360,27 @@ manifest_t* manifest_read(const char* path)
 	return manifest;
 }
 
+// Create a new copyfiles by copying the source copyfiles.
+// On success the new copyfiles is returned
+// and the length is stored in dst_copyfile_count.
+// On failure NULL is returned and dst_copyfile_count is untouched.
+copyfile_t* manifest__copyfiles_copy(
+	copyfile_t* src_copyfile,
+	unsigned src_copyfile_count,
+	unsigned* dst_copyfile_count)
+{
+	copyfile_t* ncopyfile
+		= (copyfile_t*)malloc(
+			src_copyfile_count * sizeof(copyfile_t));
+	if (!ncopyfile) return NULL;
 
+	memcpy(
+		ncopyfile,
+		src_copyfile,
+		(src_copyfile_count * sizeof(copyfile_t)));
+	*dst_copyfile_count = src_copyfile_count;
+	return ncopyfile;
+}
 
 manifest_t* manifest_copy(manifest_t* a)
 {
@@ -362,6 +406,8 @@ manifest_t* manifest_copy(manifest_t* a)
 		manifest->project[i] = a->project[i];
 		manifest->project[i].copyfile = NULL;
 		manifest->project[i].copyfile_count = 0;
+		manifest->project[i].linkfile = NULL;
+		manifest->project[i].linkfile_count = 0;
 		manifest->project[i].group = NULL;
 		manifest->project[i].group_count = 0;
 	}
@@ -371,19 +417,28 @@ manifest_t* manifest_copy(manifest_t* a)
 		if (a->project[i].copyfile_count)
 		{
 			manifest->project[i].copyfile
-				= (copyfile_t*)malloc(
-					a->project[i].copyfile_count * sizeof(copyfile_t));
+				= manifest__copyfiles_copy(
+					a->project[i].copyfile,
+					a->project[i].copyfile_count,
+					&manifest->project[i].copyfile_count);
 			if (!manifest->project[i].copyfile)
 			{
 				manifest_delete(manifest);
 				return NULL;
 			}
-			memcpy(
-				manifest->project[i].copyfile,
-				a->project[i].copyfile,
-				(a->project[i].copyfile_count * sizeof(copyfile_t)));
-			manifest->project[i].copyfile_count
-				= a->project[i].copyfile_count;
+		}
+		if (a->project[i].linkfile_count)
+		{
+			manifest->project[i].linkfile
+				= manifest__copyfiles_copy(
+					a->project[i].linkfile,
+					a->project[i].linkfile_count,
+					&manifest->project[i].linkfile_count);
+			if (!manifest->project[i].linkfile)
+			{
+				manifest_delete(manifest);
+				return NULL;
+			}
 		}
 		if (a->project[i].group_count)
 		{
@@ -571,6 +626,24 @@ bool manifest_write_snapshot(manifest_t* manifest, const char* path)
 		{
 			fprintf(fp, "/>\n");
 		}
+
+		if (project->linkfile_count)
+		{
+			fprintf(fp, ">\n");
+
+			unsigned j;
+			for (j = 0; j < project->linkfile_count; j++)
+			{
+				fprintf(fp, "\t\t<linkfile src=\"%s\" dest=\"%s\"/>\n",
+					project->linkfile[j].source, project->linkfile[j].dest);
+			}
+
+			fprintf(fp, "\t</project>\n");
+		}
+		else
+		{
+			fprintf(fp, "/>\n");
+		}
 	}
 
 	fprintf(fp, "</manifest>\n");
@@ -670,21 +743,30 @@ manifest_t* manifest_group_filter(
 
 		if (manifest->project[i].copyfile_count)
 		{
-			filtered->project[j].copyfile
-				= (copyfile_t*)malloc(
-					manifest->project[i].copyfile_count * sizeof(copyfile_t));
+			filtered->project[j].copyfile = manifest__copyfiles_copy(
+				manifest->project[j].copyfile,
+				manifest->project[j].copyfile_count,
+				&filtered->project[j].copyfile_count);
 			if (!filtered->project[j].copyfile)
 			{
 				manifest_delete(filtered);
 				return NULL;
 			}
-			memcpy(
-				filtered->project[j].copyfile,
-				manifest->project[i].copyfile,
-				(manifest->project[i].copyfile_count * sizeof(copyfile_t)));
-			filtered->project[j].copyfile_count
-				= manifest->project[i].copyfile_count;
 		}
+
+		if (manifest->project[i].linkfile_count)
+		{
+			filtered->project[j].linkfile = manifest__copyfiles_copy(
+				manifest->project[j].linkfile,
+				manifest->project[j].linkfile_count,
+				&filtered->project[j].linkfile_count);
+			if (!filtered->project[j].linkfile)
+			{
+				manifest_delete(filtered);
+				return NULL;
+			}
+		}
+
 		if (manifest->project[i].group_count)
 		{
 			if (!group_list_copy(

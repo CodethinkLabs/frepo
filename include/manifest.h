@@ -44,6 +44,8 @@ typedef struct
 	const char* revision;
 	copyfile_t* copyfile;
 	unsigned    copyfile_count;
+	copyfile_t* linkfile;
+	unsigned    linkfile_count;
 	group_t*    group;
 	unsigned    group_count;
 } project_t;
