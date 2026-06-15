@@ -79,13 +79,14 @@ static void* frepo_sync_manifest__thread(void* param)
 		= (volatile struct manifest_thread_params*)param;
 
 	unsigned p = tp->project;
+	project_t* project = &tp->manifest->project[p];
 
-	bool exists = git_exists(tp->manifest->project[p].path);
+	bool exists = git_exists(project->path);
 
 	printf("%s repository (%u/%u) '%s'.\n",
 		(exists ? "Updating" : "Cloning"),
 		(p + 1), tp->manifest->project_count,
-		tp->manifest->project[p].path);
+		project->path);
 
 	char* revision = NULL;
 	bool revision_differs = false;
@@ -93,26 +94,26 @@ static void* frepo_sync_manifest__thread(void* param)
 	if (exists && !tp->mirror)
 	{
 		revision = git_current_branch(
-			tp->manifest->project[p].path);
+			project->path);
 		if (!revision)
 		{
 			fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
-				tp->manifest->project[p].path);
+				project->path);
 			*(tp->error) = true;
 			sem_post(tp->semaphore);
 			return NULL;
 		}
 
 		revision_differs
-			= (strcmp(revision, tp->manifest->project[p].revision) != 0);
+			= (strcmp(revision, project->revision) != 0);
 		if (revision_differs && !git_checkout(
-			tp->manifest->project[p].path,
-			tp->manifest->project[p].revision, false))
+			project->path,
+			project->revision, false))
 		{
 			free(revision);
 			fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
-				tp->manifest->project[p].revision,
-				tp->manifest->project[p].path);
+				project->revision,
+				project->path);
 			*(tp->error) = true;
 			sem_post(tp->semaphore);
 			return NULL;
@@ -121,7 +122,7 @@ static void* frepo_sync_manifest__thread(void* param)
 
 	char* remote_full
 		= path_join(tp->manifest_url,
-			tp->manifest->project[p].remote);
+			project->remote);
 	if (!remote_full)
 	{
 		fprintf(stderr,
@@ -133,11 +134,11 @@ static void* frepo_sync_manifest__thread(void* param)
 	}
 
 	bool update_success = git_update(
-		tp->manifest->project[p].path,
+		project->path,
 		remote_full,
-		tp->manifest->project[p].name,
-		tp->manifest->project[p].remote_name,
-		tp->manifest->project[p].revision, tp->mirror);
+		project->name,
+		project->remote_name,
+		project->revision, tp->mirror);
 
 	unsigned r, d;
 	for (r = 0, d = tp->retry_delay;
@@ -147,23 +148,23 @@ static void* frepo_sync_manifest__thread(void* param)
 		fprintf(stderr, "Warning: Failed to %s '%s'"
 			", waiting %u ms and retrying.\n",
 			(exists ? "update" : "clone"),
-			tp->manifest->project[p].path, d);
+			project->path, d);
 
 		usleep(tp->retry_delay * 1000);
 
 		update_success = git_update(
-			tp->manifest->project[p].path,
+			project->path,
 			remote_full,
-			tp->manifest->project[p].name,
-			tp->manifest->project[p].remote_name,
-			tp->manifest->project[p].revision, tp->mirror);
+			project->name,
+			project->remote_name,
+			project->revision, tp->mirror);
 	}
 
 	if (!update_success)
 	{
 		fprintf(stderr, "Error: Failed to %s '%s'",
 			(exists ? "update" : "clone"),
-			tp->manifest->project[p].path);
+			project->path);
 		if (tp->retries != 0)
 			fprintf(stderr, " after %u retries", tp->retries);
 		fprintf(stderr, ".\n");
@@ -172,36 +173,37 @@ static void* frepo_sync_manifest__thread(void* param)
 	free(remote_full);
 
 	unsigned j;
-	for (j = 0; j < tp->manifest->project[p].copyfile_count; j++)
+	for (j = 0; j < project->copyfile_count; j++)
 	{
-		char cmd[strlen(tp->manifest->project[p].path)
-			+ strlen(tp->manifest->project[p].copyfile[j].source)
-			+ strlen(tp->manifest->project[p].copyfile[j].dest) + 16];
+		copyfile_t* copyfile = &project->copyfile[j];
+		char cmd[strlen(project->path)
+			+ strlen(copyfile->source)
+			+ strlen(copyfile->dest) + 16];
 		sprintf(cmd, "cp %s/%s %s",
-			tp->manifest->project[p].path,
-			tp->manifest->project[p].copyfile[j].source,
-			tp->manifest->project[p].copyfile[j].dest);
+			project->path,
+			copyfile->source,
+			copyfile->dest);
 		if (system(cmd) != EXIT_SUCCESS)
 		{
 			unsigned k;
 			for (k = 0; k < j; k++)
-				git_remove(tp->manifest->project[k].path);
+				git_remove(project->path);
 			fprintf(stderr,
 				"Error: Failed to perform copy '%s' to '%s'"
 				" for project '%s'\n",
-				tp->manifest->project[p].copyfile[j].source,
-				tp->manifest->project[p].copyfile[j].dest,
-				tp->manifest->project[p].path);
+				copyfile->source,
+				copyfile->dest,
+				project->path);
 			*(tp->error) = true;
 		}
 	}
 
 	if (revision_differs && !git_checkout(
-		tp->manifest->project[p].path,
+		project->path,
 		revision, false))
 	{
 		fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
-			tp->manifest->project[p].path, revision);
+			project->path, revision);
 		*(tp->error) = true;
 	}
 
