@@ -965,6 +965,22 @@ int main(int argc, char* argv[])
 		}
 	}
 
+	// If we didn't receive groups on the command-line or settings
+	// default it to "default".
+	if (settings->group == NULL)
+	{
+		if(!group_list_add(
+			"default",
+			strlen("default"),
+			false /*not excluded*/,
+			&settings->group,
+			&settings->group_count))
+		{
+			fprintf(stderr, "Failed to add \"default\" filter group.\n");
+			return EXIT_FAILURE;
+		}
+	}
+
 	if (command == frepo_command_init)
 	{
 		if (!settings_manifest_url_set(

@@ -661,46 +661,61 @@ manifest_t* manifest_group_filter(
 	if (!manifest)
 		return NULL;
 
-	bool include_default = true;
-	bool include_all = false;
-
-	unsigned i;
-	if (group_list_match(
-		"default", strlen("default"),
-		filter, filter_count, &i))
-		include_default = !filter[i].exclude;
-	if (group_list_match(
-		"all", strlen("all"),
-		filter, filter_count, &i))
-		include_all = !filter[i].exclude;
-
 	bool mask[manifest->project_count];
 
+	unsigned i;
 	unsigned project_count = 0;
 	for (i = 0; i < manifest->project_count; i++)
 	{
-		mask[i] = include_all;
-		if ((manifest->project[i].group_count == 0)
-			|| (group_list_match(
-				"default", strlen("default"),
-				manifest->project[i].group,
-				manifest->project[i].group_count, NULL)))
+		project_t* project = &manifest->project[i];
+		mask[i] = false;
+		// Process the filter in reverse since the result only depends
+		// on the last match
+		for (group_t* rule = &filter[filter_count - 1];
+			rule >= filter;
+			rule--)
 		{
-			mask[i] |= include_default;
-		}
-		else if (filter)
-		{
-			unsigned j;
-			for (j = 0; j < filter_count; j++)
+			// TODO: Should pre-parsing have an enum for rule->kind
+			// as ALL, DEFAULT or NAMED to reduce redundant parsing?
+			if (strcmp(rule->name, "all") == 0)
 			{
-				unsigned m;
-				if (group_list_match(
-					filter[j].name, filter[j].size,
-					manifest->project[i].group,
-					manifest->project[i].group_count,
-					&m))
-					mask[i] = !filter[j].exclude;
+				mask[i] = !rule->exclude;
+				break;
 			}
+
+			bool matched = false;
+			if (strcmp(rule->name, "default") == 0)
+			{
+				// Default implicitly exists if
+				// notdefault does not
+				if (!group_list_match(
+					"notdefault",
+					strlen("notdefault"),
+					project->group,
+					project->group_count,
+					NULL))
+				{
+					mask[i] = !rule->exclude;
+					matched = true;
+				}
+				// Perverse input may include both
+				// default and notdefault so we need to
+				// fall through to check if default
+				// also exists.
+			}
+
+			if (group_list_match(
+				rule->name,
+				rule->size,
+				project->group,
+				project->group_count,
+				NULL))
+			{
+				mask[i] = !rule->exclude;
+				matched = true;
+			}
+
+			if (matched) break;
 		}
 
 		if (mask[i])
