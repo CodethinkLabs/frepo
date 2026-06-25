@@ -774,6 +774,7 @@ int main(int argc, char* argv[])
 	bool        force   = false;
 	bool        print   = false;
 	long int    threads = 0;
+	const char* platform = "auto";
 
 	const char* settings_path = ".frepo/config.ini";
 	settings_t* settings = settings_read(settings_path);
@@ -895,15 +896,21 @@ int main(int argc, char* argv[])
 					a = (argc - 1);
 					break;
 				case 'p':
-					if (command != frepo_command_forall)
+					if (command == frepo_command_forall)
+					{
+						print = true;
+						break;
+					}
+
+					if ((a + 1) >= argc)
 					{
 						fprintf(stderr,
-							"Error: -p flag invalid for command.\n");
+							"Error: No platform supplied with platform flag.\n");
 						print_usage(argv[0]);
 						return EXIT_FAILURE;
 					}
 
-					print = true;
+					platform = argv[++a];
 					break;
 				case 'f':
 					if (command != frepo_command_sync)
@@ -977,6 +984,35 @@ int main(int argc, char* argv[])
 			&settings->group_count))
 		{
 			fprintf(stderr, "Failed to add \"default\" filter group.\n");
+			return EXIT_FAILURE;
+		}
+	}
+
+	const group_t* platform_groups;
+	unsigned platform_groups_count;
+	platform_groups = group_list_parse_platform(
+		platform, &platform_groups_count);
+	if (!platform_groups)
+	{
+		fprintf(stderr,
+			"Error: unrecognized platform \"%s\".\n",
+			platform);
+		print_usage(argv[0]);
+		return EXIT_FAILURE;
+	}
+	for (; platform_groups_count >= 1; platform_groups_count--, platform_groups++)
+	{
+		if (!group_list_add(
+			platform_groups->name,
+			platform_groups->size,
+			platform_groups->exclude,
+			&settings->group,
+			&settings->group_count))
+		{
+			fprintf(stderr,
+				"Failed to add \"%*s\" filter group.\n",
+				(int)platform_groups->size,
+				platform_groups->name);
 			return EXIT_FAILURE;
 		}
 	}

@@ -21,6 +21,7 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <sys/utsname.h>
 
 
 bool group_list_match(
@@ -193,4 +194,76 @@ bool group_list_parse(
 	*list = nlist;
 	*list_count = nlist_count;
 	return true;
+}
+
+
+// Sorted in order of least common to most since groups can be processed
+// in reverse order and use the last match, so it's more likely to match faster
+// if the most common is last.
+static const group_t platform_groups[] =
+{
+	{
+		"platform-darwin",
+		15,
+		false,
+	},
+	{
+		"platform-windows",
+		16,
+		false,
+	},
+	{
+		"platform-linux",
+		14,
+		false,
+	}
+};
+#define PLATFORM_GROUPS_COUNT (sizeof(platform_groups)/sizeof(platform_groups[0]))
+
+
+const group_t* group__list_find_by_name(
+	const char* platform,
+	unsigned* platform_groups_count)
+{
+	const group_t* match;
+	for (match = &platform_groups[PLATFORM_GROUPS_COUNT - 1];
+		match >= platform_groups;
+		match--)
+	{
+		if (strncasecmp(
+			platform,
+			&match->name[strlen("platform-")],
+			match->size - strlen("platform-")) == 0)
+		{
+			*platform_groups_count = 1;
+			return match;
+		}
+	}
+	return NULL;
+}
+
+
+const group_t* group_list_parse_platform(
+	const char* platform,
+	unsigned* platform_groups_count)
+{
+	if (strcmp(platform, "all") == 0)
+	{
+		*platform_groups_count = PLATFORM_GROUPS_COUNT;
+		return platform_groups;
+	}
+
+	if (strcmp(platform, "auto") == 0)
+	{
+		struct utsname u;
+		if (uname(&u) != 0)
+			// This should never happen in practise
+			// because &u is always a valid pointer,
+			return NULL;
+		return group__list_find_by_name(
+			u.sysname,
+			platform_groups_count);
+	}
+
+	return group__list_find_by_name(platform, platform_groups_count);
 }
