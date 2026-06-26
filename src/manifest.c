@@ -184,6 +184,16 @@ manifest_t* manifest_parse(xml_tag_t* document)
 
 			project->remote
 				= xml_tag_field(mdoc->tag[i], "remote");
+
+			if (xml_tag_field(mdoc->tag[i], "clone-depth"))
+			{
+				static bool warned = false;
+				if (!warned)
+				{
+					fprintf(stderr, "Warning: clone-depth is ignored.\n");
+					warned = true;
+				}
+			}
 			if (project->remote)
 			{
 				unsigned r;
