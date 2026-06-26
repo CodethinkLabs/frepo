@@ -79,6 +79,9 @@ manifest_t* manifest_parse(xml_tag_t* document)
 		else if (strcmp(mdoc->tag[i]->name, "bugurl") == 0)
 			fprintf(stderr,
 				"Warning: bugurl is ignored.\n");
+		else if (strcmp(mdoc->tag[i]->name, "contactinfo") == 0)
+			fprintf(stderr,
+				"Warning: contactinfo is ignored.\n");
 		else if (strcmp(mdoc->tag[i]->name, "superproject") == 0)
 			// Use of superproject to sync can be opted out with
 			// the --no-use-superproject option of android git-repo
