@@ -71,6 +71,11 @@ manifest_t* manifest_parse(xml_tag_t* document)
 			remote_count++;
 		else if (strcmp(mdoc->tag[i]->name, "project") == 0)
 			project_count++;
+		else if (strcmp(mdoc->tag[i]->name, "repo-hooks") == 0)
+			// Hooks are python functions loaded from file and lose
+			// the benefits of a C implementation.
+			fprintf(stderr,
+				"Warning: repo python hooks are ignored.\n");
 		else if (strcmp(mdoc->tag[i]->name, "default") != 0)
 		{
 			fprintf(stderr,
