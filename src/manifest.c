@@ -76,6 +76,9 @@ manifest_t* manifest_parse(xml_tag_t* document)
 			// the benefits of a C implementation.
 			fprintf(stderr,
 				"Warning: repo python hooks are ignored.\n");
+		else if (strcmp(mdoc->tag[i]->name, "bugurl") == 0)
+			fprintf(stderr,
+				"Warning: bugurl is ignored.\n");
 		else if (strcmp(mdoc->tag[i]->name, "default") != 0)
 		{
 			fprintf(stderr,
