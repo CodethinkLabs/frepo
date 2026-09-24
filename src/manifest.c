@@ -40,6 +40,7 @@ void manifest_delete(manifest_t* manifest)
 	for (i = 0; i < manifest->project_count; i++)
 	{
 		free(manifest->project[i].copyfile);
+		free(manifest->project[i].linkfile);
 		free(manifest->project[i].group);
 	}
 
@@ -70,6 +71,23 @@ manifest_t* manifest_parse(xml_tag_t* document)
 			remote_count++;
 		else if (strcmp(mdoc->tag[i]->name, "project") == 0)
 			project_count++;
+		else if (strcmp(mdoc->tag[i]->name, "repo-hooks") == 0)
+			// Hooks are python functions loaded from file and lose
+			// the benefits of a C implementation.
+			fprintf(stderr,
+				"Warning: repo python hooks are ignored.\n");
+		else if (strcmp(mdoc->tag[i]->name, "bugurl") == 0)
+			fprintf(stderr,
+				"Warning: bugurl is ignored.\n");
+		else if (strcmp(mdoc->tag[i]->name, "contactinfo") == 0)
+			fprintf(stderr,
+				"Warning: contactinfo is ignored.\n");
+		else if (strcmp(mdoc->tag[i]->name, "superproject") == 0)
+			// Use of superproject to sync can be opted out with
+			// the --no-use-superproject option of android git-repo
+			// so we behave as if it was always provided.
+			fprintf(stderr,
+				"Warning: superprojects are not supported.\n");
 		else if (strcmp(mdoc->tag[i]->name, "default") != 0)
 		{
 			fprintf(stderr,
@@ -166,6 +184,16 @@ manifest_t* manifest_parse(xml_tag_t* document)
 
 			project->remote
 				= xml_tag_field(mdoc->tag[i], "remote");
+
+			if (xml_tag_field(mdoc->tag[i], "clone-depth"))
+			{
+				static bool warned = false;
+				if (!warned)
+				{
+					fprintf(stderr, "Warning: clone-depth is ignored.\n");
+					warned = true;
+				}
+			}
 			if (project->remote)
 			{
 				unsigned r;
@@ -203,54 +231,77 @@ manifest_t* manifest_parse(xml_tag_t* document)
 			project->copyfile_count = 0;
 			project->copyfile = NULL;
 
+			project->linkfile_count = 0;
+			project->linkfile = NULL;
+
 			project->group_count = 0;
 			project->group = NULL;
 
 			unsigned k;
 			for (k = 0; k < mdoc->tag[i]->tag_count; k++)
 			{
-				if (strcmp(mdoc->tag[i]->tag[k]->name, "copyfile") != 0)
+				const char* tag_name = mdoc->tag[i]->tag[k]->name;
+
+				const char *copyfile_kind;
+				copyfile_t** copyfile;
+				unsigned* copyfile_count;
+				if (strcmp(tag_name, "copyfile") == 0)
+				{
+					copyfile_kind = "copyfile";
+					copyfile = &project->copyfile;
+					copyfile_count = &project->copyfile_count;
+				}
+				else if (strcmp(tag_name, "linkfile") == 0)
+				{
+					copyfile_kind = "linkfile";
+					copyfile = &project->linkfile;
+					copyfile_count = &project->linkfile_count;
+				}
+				else
 				{
 					fprintf(stderr,
 						"Warning: Unknown project sub-tag '%s'.\n",
-						mdoc->tag[i]->tag[k]->name);
+						tag_name);
 					continue;
 				}
 
 				copyfile_t* ncopyfile
-					= (copyfile_t*)realloc(project->copyfile,
-						(project->copyfile_count + 1) * sizeof(copyfile_t));
+					= (copyfile_t*)realloc(*copyfile,
+						((*copyfile_count) + 1) * sizeof(copyfile_t));
 				if (!ncopyfile)
 				{
 					fprintf(stderr,
-						"Error: Failed to add copyfile to project.\n");
+						"Error: Failed to add %s to project.\n",
+						copyfile_kind);
 					manifest_delete(manifest);
 					return NULL;
 				}
 
-				project->copyfile = ncopyfile;
-				project->copyfile[project->copyfile_count].source
+				*copyfile = ncopyfile;
+				(*copyfile)[*copyfile_count].source
 					= xml_tag_field(mdoc->tag[i]->tag[k], "src");
-				project->copyfile[project->copyfile_count].dest
+				(*copyfile)[*copyfile_count].dest
 					= xml_tag_field(mdoc->tag[i]->tag[k], "dest");
 
-				if (!project->copyfile[project->copyfile_count].source)
+				if (!(*copyfile)[*copyfile_count].source)
 				{
 					fprintf(stderr,
-						"Error: Invalid copyfile tag, missing source field.\n");
+						"Error: Invalid %s tag, missing source field.\n",
+						copyfile_kind);
 					manifest_delete(manifest);
 					return NULL;
 				}
 
-				if (!project->copyfile[project->copyfile_count].dest)
+				if (!(*copyfile)[*copyfile_count].dest)
 				{
 					fprintf(stderr,
-						"Error: Invalid copyfile tag, missing dest field.\n");
+						"Error: Invalid %s tag, missing dest field.\n",
+						copyfile_kind);
 					manifest_delete(manifest);
 					return NULL;
 				}
 
-				project->copyfile_count++;
+				(*copyfile_count)++;
 			}
 
 			const char* groups
@@ -299,6 +350,12 @@ manifest_t* manifest_read(const char* path)
 		return NULL;
 	}
 
+	if (manifest_stat.st_size < 0)
+	{
+		close(fd);
+		fprintf(stderr, "Error: File %s has negative size.\n", path);
+	}
+
 	char manifest_string[manifest_stat.st_size + 1];
 	if (read(fd, manifest_string, manifest_stat.st_size) < 0)
 	{
@@ -311,7 +368,7 @@ manifest_t* manifest_read(const char* path)
 	close(fd);
 
 	xml_tag_t* manifest_xml
-		= xml_document_parse(manifest_string);
+		= xml_document_parse(manifest_string, manifest_stat.st_size);
 	if (!manifest_xml)
 	{
 		fprintf(stderr, "Error: Failed to parse xml in manifest file.\n");
@@ -330,7 +387,27 @@ manifest_t* manifest_read(const char* path)
 	return manifest;
 }
 
+// Create a new copyfiles by copying the source copyfiles.
+// On success the new copyfiles is returned
+// and the length is stored in dst_copyfile_count.
+// On failure NULL is returned and dst_copyfile_count is untouched.
+copyfile_t* manifest__copyfiles_copy(
+	copyfile_t* src_copyfile,
+	unsigned src_copyfile_count,
+	unsigned* dst_copyfile_count)
+{
+	copyfile_t* ncopyfile
+		= (copyfile_t*)malloc(
+			src_copyfile_count * sizeof(copyfile_t));
+	if (!ncopyfile) return NULL;
 
+	memcpy(
+		ncopyfile,
+		src_copyfile,
+		(src_copyfile_count * sizeof(copyfile_t)));
+	*dst_copyfile_count = src_copyfile_count;
+	return ncopyfile;
+}
 
 manifest_t* manifest_copy(manifest_t* a)
 {
@@ -356,6 +433,8 @@ manifest_t* manifest_copy(manifest_t* a)
 		manifest->project[i] = a->project[i];
 		manifest->project[i].copyfile = NULL;
 		manifest->project[i].copyfile_count = 0;
+		manifest->project[i].linkfile = NULL;
+		manifest->project[i].linkfile_count = 0;
 		manifest->project[i].group = NULL;
 		manifest->project[i].group_count = 0;
 	}
@@ -365,19 +444,28 @@ manifest_t* manifest_copy(manifest_t* a)
 		if (a->project[i].copyfile_count)
 		{
 			manifest->project[i].copyfile
-				= (copyfile_t*)malloc(
-					a->project[i].copyfile_count * sizeof(copyfile_t));
+				= manifest__copyfiles_copy(
+					a->project[i].copyfile,
+					a->project[i].copyfile_count,
+					&manifest->project[i].copyfile_count);
 			if (!manifest->project[i].copyfile)
 			{
 				manifest_delete(manifest);
 				return NULL;
 			}
-			memcpy(
-				manifest->project[i].copyfile,
-				a->project[i].copyfile,
-				(a->project[i].copyfile_count * sizeof(copyfile_t)));
-			manifest->project[i].copyfile_count
-				= a->project[i].copyfile_count;
+		}
+		if (a->project[i].linkfile_count)
+		{
+			manifest->project[i].linkfile
+				= manifest__copyfiles_copy(
+					a->project[i].linkfile,
+					a->project[i].linkfile_count,
+					&manifest->project[i].linkfile_count);
+			if (!manifest->project[i].linkfile)
+			{
+				manifest_delete(manifest);
+				return NULL;
+			}
 		}
 		if (a->project[i].group_count)
 		{
@@ -565,6 +653,24 @@ bool manifest_write_snapshot(manifest_t* manifest, const char* path)
 		{
 			fprintf(fp, "/>\n");
 		}
+
+		if (project->linkfile_count)
+		{
+			fprintf(fp, ">\n");
+
+			unsigned j;
+			for (j = 0; j < project->linkfile_count; j++)
+			{
+				fprintf(fp, "\t\t<linkfile src=\"%s\" dest=\"%s\"/>\n",
+					project->linkfile[j].source, project->linkfile[j].dest);
+			}
+
+			fprintf(fp, "\t</project>\n");
+		}
+		else
+		{
+			fprintf(fp, "/>\n");
+		}
 	}
 
 	fprintf(fp, "</manifest>\n");
@@ -582,46 +688,61 @@ manifest_t* manifest_group_filter(
 	if (!manifest)
 		return NULL;
 
-	bool include_default = true;
-	bool include_all = false;
-
-	unsigned i;
-	if (group_list_match(
-		"default", strlen("default"),
-		filter, filter_count, &i))
-		include_default = !filter[i].exclude;
-	if (group_list_match(
-		"all", strlen("all"),
-		filter, filter_count, &i))
-		include_all = !filter[i].exclude;
-
 	bool mask[manifest->project_count];
 
+	unsigned i;
 	unsigned project_count = 0;
 	for (i = 0; i < manifest->project_count; i++)
 	{
-		mask[i] = include_all;
-		if ((manifest->project[i].group_count == 0)
-			|| (group_list_match(
-				"default", strlen("default"),
-				manifest->project[i].group,
-				manifest->project[i].group_count, NULL)))
+		project_t* project = &manifest->project[i];
+		mask[i] = false;
+		// Process the filter in reverse since the result only depends
+		// on the last match
+		for (group_t* rule = &filter[filter_count - 1];
+			rule >= filter;
+			rule--)
 		{
-			mask[i] |= include_default;
-		}
-		else if (filter)
-		{
-			unsigned j;
-			for (j = 0; j < filter_count; j++)
+			// TODO: Should pre-parsing have an enum for rule->kind
+			// as ALL, DEFAULT or NAMED to reduce redundant parsing?
+			if (strcmp(rule->name, "all") == 0)
 			{
-				unsigned m;
-				if (group_list_match(
-					filter[j].name, filter[j].size,
-					manifest->project[i].group,
-					manifest->project[i].group_count,
-					&m))
-					mask[i] = !filter[j].exclude;
+				mask[i] = !rule->exclude;
+				break;
 			}
+
+			bool matched = false;
+			if (strcmp(rule->name, "default") == 0)
+			{
+				// Default implicitly exists if
+				// notdefault does not
+				if (!group_list_match(
+					"notdefault",
+					strlen("notdefault"),
+					project->group,
+					project->group_count,
+					NULL))
+				{
+					mask[i] = !rule->exclude;
+					matched = true;
+				}
+				// Perverse input may include both
+				// default and notdefault so we need to
+				// fall through to check if default
+				// also exists.
+			}
+
+			if (group_list_match(
+				rule->name,
+				rule->size,
+				project->group,
+				project->group_count,
+				NULL))
+			{
+				mask[i] = !rule->exclude;
+				matched = true;
+			}
+
+			if (matched) break;
 		}
 
 		if (mask[i])
@@ -664,21 +785,30 @@ manifest_t* manifest_group_filter(
 
 		if (manifest->project[i].copyfile_count)
 		{
-			filtered->project[j].copyfile
-				= (copyfile_t*)malloc(
-					manifest->project[i].copyfile_count * sizeof(copyfile_t));
+			filtered->project[j].copyfile = manifest__copyfiles_copy(
+				manifest->project[j].copyfile,
+				manifest->project[j].copyfile_count,
+				&filtered->project[j].copyfile_count);
 			if (!filtered->project[j].copyfile)
 			{
 				manifest_delete(filtered);
 				return NULL;
 			}
-			memcpy(
-				filtered->project[j].copyfile,
-				manifest->project[i].copyfile,
-				(manifest->project[i].copyfile_count * sizeof(copyfile_t)));
-			filtered->project[j].copyfile_count
-				= manifest->project[i].copyfile_count;
 		}
+
+		if (manifest->project[i].linkfile_count)
+		{
+			filtered->project[j].linkfile = manifest__copyfiles_copy(
+				manifest->project[j].linkfile,
+				manifest->project[j].linkfile_count,
+				&filtered->project[j].linkfile_count);
+			if (!filtered->project[j].linkfile)
+			{
+				manifest_delete(filtered);
+				return NULL;
+			}
+		}
+
 		if (manifest->project[i].group_count)
 		{
 			if (!group_list_copy(

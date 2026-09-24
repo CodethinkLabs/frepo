@@ -23,108 +23,16 @@
 #include <stdbool.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdio.h>
+#include <limits.h>
+#include <assert.h>
 
+#include <expat.h>
 
 
 xml_tag_t* xml__tag_create(const char* name, xml_tag_t* parent);
 bool       xml__tag_append_field(xml_tag_t* tag, xml_field_t* field);
 bool       xml__tag_insert_tag(xml_tag_t* tag, xml_tag_t* child);
-
-
-
-unsigned xml__parse_comment(const char* source)
-{
-	if (!source)
-		return 0;
-	if (strncmp(source, "<!--", 4) != 0)
-		return 0;
-
-	unsigned i;
-	for (i = 4; source[i] != '\0'; i++)
-	{
-		if (strncmp(&source[i], "-->", 3) == 0)
-		{
-			i += 3;
-			break;
-		}
-	}
-
-	return i;
-}
-
-unsigned xml__parse_whitespace(const char* source)
-{
-	if (!source)
-		return 0;
-
-	unsigned i;
-	for (i = 0; isspace(source[i]); i++);
-
-	unsigned c = xml__parse_comment(&source[i]);
-	if (c)
-	{
-		i += c;
-		i += xml__parse_whitespace(&source[i]);
-	}
-
-	return i;
-}
-
-unsigned xml__parse_field(const char* source, xml_field_t** field)
-{
-	if (!source)
-		return 0;
-
-	unsigned i = 0;
-	i += xml__parse_whitespace(&source[i]);
-
-	const char* name = &source[i];
-	if (!isalpha(source[i])
-		&& (source[i] != '_'))
-		return 0;
-	unsigned n;
-	for (n = 1; isalnum(source[i + n])
-		|| (source[i + n] == '_')
-		|| (source[i + n] == '-')
-		; n++);
-	i += n;
-
-	if (source[i++] != '=')
-		return 0;
-
-	if (source[i++] != '\"')
-		return 0;
-	const char* data = &source[i];
-	unsigned d;
-	for (d = 0; (source[i + d] != '\"')
-		&& (source[i + d] != '\0'); d++);
-	i += d;
-	if (source[i++] != '\"')
-		return 0;
-
-	i += xml__parse_whitespace(&source[i]);
-
-	if (field)
-	{
-		xml_field_t* nfield
-			= (xml_field_t*)malloc(sizeof(xml_field_t)
-				+ n + d + 2);
-		if (!nfield) return 0;
-
-		nfield->name = (char*)((uintptr_t)nfield + sizeof(xml_field_t));
-		nfield->data = (char*)((uintptr_t)nfield->name + n + 1);
-
-		memcpy(nfield->name, name, n);
-		nfield->name[n] = '\0';
-
-		memcpy(nfield->data, data, d);
-		nfield->data[d] = '\0';
-
-		*field = nfield;
-	}
-
-	return i;
-}
 
 
 
@@ -175,6 +83,28 @@ void xml_tag_delete(xml_tag_t* tag)
 	free(tag);
 }
 
+xml_field_t* xml__field_create(const char* name, const char* data)
+{
+	size_t n = strlen(name);
+	size_t d = strlen(data);
+	xml_field_t* nfield
+	        = (xml_field_t*)malloc(sizeof(xml_field_t)
+	                + n + d + 2);
+	if (!nfield) return NULL;
+
+	nfield->name = (char*)((uintptr_t)nfield + sizeof(xml_field_t));
+	nfield->data = (char*)((uintptr_t)nfield->name + n + 1);
+
+	memcpy(nfield->name, name, n);
+	nfield->name[n] = '\0';
+
+	memcpy(nfield->data, data, d);
+	nfield->data[d] = '\0';
+
+	return nfield;
+}
+
+
 bool xml__tag_append_field(xml_tag_t* tag, xml_field_t* field)
 {
 	if (!tag || !field)
@@ -206,166 +136,153 @@ bool xml__tag_insert_tag(xml_tag_t* tag, xml_tag_t* child)
 	return true;
 }
 
-
-
-unsigned xml__parse_tag(const char* source, xml_tag_t** tag)
+typedef enum
 {
-	if (!source)
-		return 0;
+	xml__RESULT_SUCCESS,
+	xml__RESULT_CREATE_TAG_FAILED,
+	xml__RESULT_INSERT_TAG_FAILED,
+	xml__RESULT_CREATE_FIELD_FAILED,
+	xml__RESULT_APPEND_FIELD_FAILED,
+} xml__result_e;
 
-	unsigned i = 0;
-	i += xml__parse_whitespace(&source[i]);
+const char* xml__result_string(xml__result_e e)
+{
+	switch (e) {
+		case xml__RESULT_SUCCESS:
+			return "Succeded";
+		case xml__RESULT_CREATE_TAG_FAILED:
+			return "Creating tag value failed";
+		case xml__RESULT_INSERT_TAG_FAILED:
+			return "Inserting tag into parent failed";
+		case xml__RESULT_CREATE_FIELD_FAILED:
+			return "Creating field value failed";
+		case xml__RESULT_APPEND_FIELD_FAILED:
+			return "Appending field into tag failed";
+		default:
+			return "INVAILD RESULT VALUE!";
+	}
+}
 
-	if (source[i++] != '<')
-		return 0;
+typedef struct xml__state_s
+{
+	XML_Parser parser;
+	xml_tag_t* current;
+	xml__result_e result;
+} xml__state_t;
 
-	const char* name = &source[i];
-	if (!isalpha(source[i])
-		&& (source[i] != '_'))
-		return 0;
-	unsigned n;
-	for (n = 1; isalnum(source[i + n]) || (source[i + n] == '_'); n++);
-	i += n;
+void xml__stop_parser(xml__state_t* state, xml__result_e code)
+{
+	enum XML_Status res = XML_StopParser(state->parser, XML_FALSE);
+	// We should only stop once,
+	// so shouldn't fail from already having stopped.
+	assert(res == XML_STATUS_OK);
+	(void)res;
+	state->result = code;
+}
 
-	i += xml__parse_whitespace(&source[i]);
-
-	char nstr[n + 1];
-	memcpy(nstr, name, n);
-	nstr[n] = '\0';
-
-	xml_tag_t* ntag = xml__tag_create(nstr, NULL);
-	if (!ntag) return 0;
-
-	while (true)
+static void XMLCALL xml__start_element(void* ud, const XML_Char* name, const XML_Char** attrs)
+{
+#ifdef XML_UNICODE
+#error "Conversion from wide characters to multibyte streams is not implemented"
+#else
+	xml__state_t* state = (xml__state_t*)ud;
+	xml_tag_t* ntag = xml__tag_create(name, state->current);
+	if (!ntag)
 	{
-		xml_field_t* field;
-		unsigned field_length = xml__parse_field(&source[i], &field);
-		if (field_length == 0) break;
+		xml__stop_parser(state, xml__RESULT_CREATE_TAG_FAILED);
+		return;
+	}
+
+	while (attrs[0] != NULL)
+	{
+		xml_field_t *field = xml__field_create(attrs[0], attrs[1]);
+		if (!field)
+		{
+			xml_tag_delete(ntag);
+			xml__stop_parser(state, xml__RESULT_CREATE_FIELD_FAILED);
+			return;
+		}
 
 		if (!xml__tag_append_field(ntag, field))
 		{
 			free(field);
 			xml_tag_delete(ntag);
-			return 0;
+			xml__stop_parser(state, xml__RESULT_APPEND_FIELD_FAILED);
+			return;
 		}
-
-		i += field_length;
+		attrs += 2;
 	}
 
-	i += xml__parse_whitespace(&source[i]);
-
-	bool empty = (source[i] == '/');
-	if (empty) i++;
-
-	if (source[i++] != '>')
-	{
-		xml_tag_delete(ntag);
-		return 0;
-	}
-	i += xml__parse_whitespace(&source[i]);
-
-	if (!empty)
-	{
-		while (true)
-		{
-			xml_tag_t* ctag;
-			unsigned ctag_length = xml__parse_tag(&source[i], &ctag);
-			if (ctag_length == 0) break;
-
-			if (!xml__tag_insert_tag(ntag, ctag))
-			{
-				xml_tag_delete(ctag);
-				xml_tag_delete(ntag);
-				return 0;
-			}
-
-			i += ctag_length;
-		}
-
-		i += xml__parse_whitespace(&source[i]);
-		if ((strncmp(&source[i], "</", 2) != 0)
-			|| (strncmp(&source[i + 2], name, n) != 0)
-			|| (source[i + 2 + n] != '>'))
-		{
-			xml_tag_delete(ntag);
-			return 0;
-		}
-		i += (2 + n + 1);
-		i += xml__parse_whitespace(&source[i]);
-	}
-
-	if (tag)
-		*tag = ntag;
-	else
-		xml_tag_delete(ntag);
-
-	return i;
+	state->current = ntag;
+#endif
 }
 
-
-
-xml_tag_t* xml_document_parse(const char* source)
+static void XMLCALL xml__end_element(void* ud, const XML_Char* /*name*/)
 {
-	xml_tag_t* document
-		= xml__tag_create(NULL, NULL);
-	if (!document) return NULL;
-
-	unsigned i = 0;
-	i += xml__parse_whitespace(&source[i]);
-
-	if (strncmp(&source[i], "<?xml", 5) == 0)
+	xml__state_t* state = (xml__state_t*)ud;
+	// If we stop in the element start handler the end element handler may
+	// still be called when stopping in an empty element, so we ignore this
+	// event if we are flagged as in an error state.
+	if (state->result != xml__RESULT_SUCCESS)
 	{
-		i += 5;
-
-		while (true)
-		{
-			xml_field_t* field;
-			unsigned field_length = xml__parse_field(&source[i], &field);
-			if (field_length == 0) break;
-
-			if (!xml__tag_append_field(document, field))
-			{
-				free(field);
-				xml_tag_delete(document);
-				return NULL;
-			}
-
-			i += field_length;
-		}
-
-		i += xml__parse_whitespace(&source[i]);
-		if (strncmp(&source[i], "?>", 2) != 0)
-		{
-			xml_tag_delete(document);
-			return NULL;
-		}
-		i += 2;
-		i += xml__parse_whitespace(&source[i]);
+		// We assume if an error happened in an empty element start
+		// that the current element was never updated so we don't
+		// need to reset it.
+		return;
 	}
 
-	while (true)
+	// finish the current tag by inserting it into the parent tag
+	xml_tag_t *current = state->current;
+	xml_tag_t *parent = current->parent;
+	if (!xml__tag_insert_tag(parent, current))
 	{
-		xml_tag_t* tag;
-		unsigned tag_length = xml__parse_tag(&source[i], &tag);
-		if (tag_length == 0) break;
-
-		if (!xml__tag_insert_tag(document, tag))
-		{
-			xml_tag_delete(tag);
-			xml_tag_delete(document);
-			return NULL;
-		}
-
-		i += tag_length;
+		xml_tag_delete(current);
+		xml__stop_parser(state, xml__RESULT_INSERT_TAG_FAILED);
+		// Intentional fallthrough
 	}
-	i += xml__parse_whitespace(&source[i]);
+	state->current = parent;
+}
 
-	if (source[i] != '\0')
-	{
-		xml_tag_delete(document);
+xml_tag_t* xml_document_parse(const char* source, size_t len)
+{
+	if (len > INT_MAX) {
+		fprintf(stderr, "Error: Document size %zu exceeds maximum expat's API can accept.\n", len);
 		return NULL;
 	}
 
+	xml__state_t state;
+	state.result = xml__RESULT_SUCCESS;
+	xml_tag_t* document = xml__tag_create(NULL, NULL);
+	if (!document) {
+		fprintf(stderr, "Error: Failed to create empty document tag.\n");
+		return NULL;
+	}
+	state.current = document;
+
+	state.parser = XML_ParserCreate(NULL);
+	if (!state.parser) {
+		fprintf(stderr, "Error: Failed to create XML parser.\n");
+		return NULL;
+	}
+	XML_SetElementHandler(state.parser, xml__start_element, xml__end_element);
+	XML_SetUserData(state.parser, &state);
+
+	enum XML_Status result = XML_Parse(state.parser, source, len, /*isFinal*/ 1);
+	if (result != XML_STATUS_OK) {
+		fprintf(stderr,
+			"Error: Parsing failed with parser status: %s and processor status: %s.\n",
+			XML_ErrorString(XML_GetErrorCode(state.parser)),
+			xml__result_string(state.result));
+		// Free from the root document instead of the current state
+		// since delete is recursive and will get the current tag
+		// but the current tag may not be popped off the stack back
+		// to the root document tag in the case of error.
+		xml_tag_delete(document);
+		XML_ParserFree(state.parser);
+		return NULL;
+	}
+
+	XML_ParserFree(state.parser);
 	return document;
 }
 

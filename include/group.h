@@ -47,4 +47,8 @@ extern bool group_list_parse(
 	const char* groups, bool filter,
 	group_t** list, unsigned* list_count);
 
+extern const group_t* group_list_parse_platform(
+	const char* platform,
+	unsigned* platform_groups_count);
+
 #endif

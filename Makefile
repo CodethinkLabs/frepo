@@ -5,10 +5,10 @@ INCLUDE = -I include
 CFLAGS_COMMON = $(INCLUDE) -Wall -Wextra -Werror -MD -MP
 CFLAGS_RELEASE  = -DNDEBUG -O3 $(CFLAGS_COMMON)
 CFLAGS_DEBUG = -O0 -g $(CFLAGS_COMMON)
-LDFLAGS_DEBUG = -lm
+LDFLAGS_DEBUG = -lm -lexpat
 LDFLAGS_RELEASE = -s $(LDFLAGS_DEBUG)
 
-SRC = $(shell find src -type f)
+SRC = $(shell find src -type f -name "*.c")
 OBJ_RELEASE = $(patsubst src/%.c, .build/%.o, $(SRC))
 DEP_RELEASE = $(patsubst src/%.c, .build/%.d, $(SRC))
 OBJ_DEBUG = $(patsubst src/%.c, .build/debug/%.o, $(SRC))

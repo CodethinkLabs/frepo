@@ -73,19 +73,36 @@ struct manifest_thread_params
 	bool        complete;
 };
 
+static int do_copyfile(
+	const char* cmd,
+	const char* path,
+	const char* source,
+	const char* dest)
+{
+	char buf[strlen(cmd)
+		+ strlen(path)
+		+ strlen(source)
+		+ strlen(dest) + 4];
+	sprintf(buf,
+		"%s %s/%s %s",
+		cmd, path, source, dest);
+	return system(buf);
+}
+
 static void* frepo_sync_manifest__thread(void* param)
 {
 	volatile struct manifest_thread_params* tp
 		= (volatile struct manifest_thread_params*)param;
 
 	unsigned p = tp->project;
+	project_t* project = &tp->manifest->project[p];
 
-	bool exists = git_exists(tp->manifest->project[p].path);
+	bool exists = git_exists(project->path);
 
 	printf("%s repository (%u/%u) '%s'.\n",
 		(exists ? "Updating" : "Cloning"),
 		(p + 1), tp->manifest->project_count,
-		tp->manifest->project[p].path);
+		project->path);
 
 	char* revision = NULL;
 	bool revision_differs = false;
@@ -93,26 +110,26 @@ static void* frepo_sync_manifest__thread(void* param)
 	if (exists && !tp->mirror)
 	{
 		revision = git_current_branch(
-			tp->manifest->project[p].path);
+			project->path);
 		if (!revision)
 		{
 			fprintf(stderr, "Error: Failed to check current revision of '%s'.\n",
-				tp->manifest->project[p].path);
+				project->path);
 			*(tp->error) = true;
 			sem_post(tp->semaphore);
 			return NULL;
 		}
 
 		revision_differs
-			= (strcmp(revision, tp->manifest->project[p].revision) != 0);
+			= (strcmp(revision, project->revision) != 0);
 		if (revision_differs && !git_checkout(
-			tp->manifest->project[p].path,
-			tp->manifest->project[p].revision, false))
+			project->path,
+			project->revision, false))
 		{
 			free(revision);
 			fprintf(stderr, "Error: Failed to checkout revision '%s' of '%s'.\n",
-				tp->manifest->project[p].revision,
-				tp->manifest->project[p].path);
+				project->revision,
+				project->path);
 			*(tp->error) = true;
 			sem_post(tp->semaphore);
 			return NULL;
@@ -121,7 +138,7 @@ static void* frepo_sync_manifest__thread(void* param)
 
 	char* remote_full
 		= path_join(tp->manifest_url,
-			tp->manifest->project[p].remote);
+			project->remote);
 	if (!remote_full)
 	{
 		fprintf(stderr,
@@ -133,11 +150,11 @@ static void* frepo_sync_manifest__thread(void* param)
 	}
 
 	bool update_success = git_update(
-		tp->manifest->project[p].path,
+		project->path,
 		remote_full,
-		tp->manifest->project[p].name,
-		tp->manifest->project[p].remote_name,
-		tp->manifest->project[p].revision, tp->mirror);
+		project->name,
+		project->remote_name,
+		project->revision, tp->mirror);
 
 	unsigned r, d;
 	for (r = 0, d = tp->retry_delay;
@@ -147,23 +164,23 @@ static void* frepo_sync_manifest__thread(void* param)
 		fprintf(stderr, "Warning: Failed to %s '%s'"
 			", waiting %u ms and retrying.\n",
 			(exists ? "update" : "clone"),
-			tp->manifest->project[p].path, d);
+			project->path, d);
 
 		usleep(tp->retry_delay * 1000);
 
 		update_success = git_update(
-			tp->manifest->project[p].path,
+			project->path,
 			remote_full,
-			tp->manifest->project[p].name,
-			tp->manifest->project[p].remote_name,
-			tp->manifest->project[p].revision, tp->mirror);
+			project->name,
+			project->remote_name,
+			project->revision, tp->mirror);
 	}
 
 	if (!update_success)
 	{
 		fprintf(stderr, "Error: Failed to %s '%s'",
 			(exists ? "update" : "clone"),
-			tp->manifest->project[p].path);
+			project->path);
 		if (tp->retries != 0)
 			fprintf(stderr, " after %u retries", tp->retries);
 		fprintf(stderr, ".\n");
@@ -172,36 +189,54 @@ static void* frepo_sync_manifest__thread(void* param)
 	free(remote_full);
 
 	unsigned j;
-	for (j = 0; j < tp->manifest->project[p].copyfile_count; j++)
+	for (j = 0; j < project->copyfile_count; j++)
 	{
-		char cmd[strlen(tp->manifest->project[p].path)
-			+ strlen(tp->manifest->project[p].copyfile[j].source)
-			+ strlen(tp->manifest->project[p].copyfile[j].dest) + 16];
-		sprintf(cmd, "cp %s/%s %s",
-			tp->manifest->project[p].path,
-			tp->manifest->project[p].copyfile[j].source,
-			tp->manifest->project[p].copyfile[j].dest);
-		if (system(cmd) != EXIT_SUCCESS)
+		copyfile_t* copyfile = &project->copyfile[j];
+		int res = do_copyfile("cp", project->path, copyfile->source, copyfile->dest);
+		if (res != EXIT_SUCCESS)
 		{
 			unsigned k;
 			for (k = 0; k < j; k++)
-				git_remove(tp->manifest->project[k].path);
+				git_remove(project->path);
 			fprintf(stderr,
 				"Error: Failed to perform copy '%s' to '%s'"
 				" for project '%s'\n",
-				tp->manifest->project[p].copyfile[j].source,
-				tp->manifest->project[p].copyfile[j].dest,
-				tp->manifest->project[p].path);
+				copyfile->source,
+				copyfile->dest,
+				project->path);
+			*(tp->error) = true;
+		}
+	}
+
+	for (j = 0; j < project->linkfile_count; j++)
+	{
+		copyfile_t* linkfile = &project->linkfile[j];
+		int res = do_copyfile(
+			"ln --symbolic --relative",
+			project->path,
+			linkfile->source,
+			linkfile->dest);
+		if (res != EXIT_SUCCESS)
+		{
+			unsigned k;
+			for (k = 0; k < j; k++)
+				git_remove(project->path);
+			fprintf(stderr,
+				"Error: Failed to perform link '%s' to '%s'"
+				" for project '%s'\n",
+				linkfile->source,
+				linkfile->dest,
+				project->path);
 			*(tp->error) = true;
 		}
 	}
 
 	if (revision_differs && !git_checkout(
-		tp->manifest->project[p].path,
+		project->path,
 		revision, false))
 	{
 		fprintf(stderr, "Error: Failed to revert '%s' to revision '%s'.\n",
-			tp->manifest->project[p].path, revision);
+			project->path, revision);
 		*(tp->error) = true;
 	}
 
@@ -739,6 +774,7 @@ int main(int argc, char* argv[])
 	bool        force   = false;
 	bool        print   = false;
 	long int    threads = 0;
+	const char* platform = "auto";
 
 	const char* settings_path = ".frepo/config.ini";
 	settings_t* settings = settings_read(settings_path);
@@ -860,15 +896,21 @@ int main(int argc, char* argv[])
 					a = (argc - 1);
 					break;
 				case 'p':
-					if (command != frepo_command_forall)
+					if (command == frepo_command_forall)
+					{
+						print = true;
+						break;
+					}
+
+					if ((a + 1) >= argc)
 					{
 						fprintf(stderr,
-							"Error: -p flag invalid for command.\n");
+							"Error: No platform supplied with platform flag.\n");
 						print_usage(argv[0]);
 						return EXIT_FAILURE;
 					}
 
-					print = true;
+					platform = argv[++a];
 					break;
 				case 'f':
 					if (command != frepo_command_sync)
@@ -927,6 +969,51 @@ int main(int argc, char* argv[])
 				print_usage(argv[0]);
 				return EXIT_FAILURE;
 			}
+		}
+	}
+
+	// If we didn't receive groups on the command-line or settings
+	// default it to "default".
+	if (settings->group == NULL)
+	{
+		if(!group_list_add(
+			"default",
+			strlen("default"),
+			false /*not excluded*/,
+			&settings->group,
+			&settings->group_count))
+		{
+			fprintf(stderr, "Failed to add \"default\" filter group.\n");
+			return EXIT_FAILURE;
+		}
+	}
+
+	const group_t* platform_groups;
+	unsigned platform_groups_count;
+	platform_groups = group_list_parse_platform(
+		platform, &platform_groups_count);
+	if (!platform_groups)
+	{
+		fprintf(stderr,
+			"Error: unrecognized platform \"%s\".\n",
+			platform);
+		print_usage(argv[0]);
+		return EXIT_FAILURE;
+	}
+	for (; platform_groups_count >= 1; platform_groups_count--, platform_groups++)
+	{
+		if (!group_list_add(
+			platform_groups->name,
+			platform_groups->size,
+			platform_groups->exclude,
+			&settings->group,
+			&settings->group_count))
+		{
+			fprintf(stderr,
+				"Failed to add \"%*s\" filter group.\n",
+				(int)platform_groups->size,
+				platform_groups->name);
+			return EXIT_FAILURE;
 		}
 	}
 
