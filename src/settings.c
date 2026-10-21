@@ -38,6 +38,7 @@ settings_t* settings_create(bool mirror)
 	settings->manifest_name = (char*)manifest_name_default;
 	settings->manifest_path = NULL;
 	settings->mirror        = mirror;
+	settings->flatten_urls  = false;
 	settings->group         = NULL;
 	settings->group_count   = 0;
 	settings->group_string  = NULL;
@@ -230,6 +231,14 @@ settings_t* settings_read(const char* path)
 				continue;
 			settings->mirror = (value[0] == '1');
 		}
+		else if (strncmp(sline, "flatten-urls", 12) == 0)
+		{
+			if ((value[0] == '\0')
+				|| (value[1] != '\0')
+				|| ((value[0] != '0') && (value[0] != '1')))
+				continue;
+			settings->flatten_urls = (value[0] == '1');
+		}
 		else if (strncmp(sline, "group-filter", 12) == 0)
 		{
 			size_t vlen = strlen(value) + 1;
@@ -276,6 +285,9 @@ bool settings_write(settings_t* settings, const char* path)
 
 	if (settings->mirror)
 		fprintf(fp, "mirror=%u\n", (unsigned)settings->mirror);
+
+	if (settings->flatten_urls)
+		fprintf(fp, "flatten-urls=%d\n", settings->flatten_urls ? 1 : 0);
 
 	if (settings->group
 		&& (settings->group_count > 0))

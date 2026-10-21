@@ -50,7 +50,7 @@ typedef enum
 
 void print_usage(const char* prog)
 {
-	printf("%s init name -u manifest [-b branch] [-g groups] [--mirror] [-j threads]\n", prog);
+	printf("%s init name -u manifest [-b branch] [-g groups] [--mirror] [--flatten-urls] [-j threads]\n", prog);
 	printf("%s sync [-f] [-b branch] [-g groups] [-j threads]\n", prog);
 	printf("%s snapshot name [-g groups]\n", prog);
 	printf("%s list [-g groups]\n", prog);
@@ -63,6 +63,7 @@ struct manifest_thread_params
 	const char* manifest_url;
 	manifest_t* manifest;
 	bool        mirror;
+	bool        flatten_urls;
 	sem_t*      semaphore;
 	unsigned    retries;
 	unsigned    retry_delay;
@@ -99,6 +100,77 @@ static char* reponame(char* path)
 		path[pathlen-4] = '\0';
 
 	return path;
+}
+
+/*
+ * Certain git forges are unable to cope with Android repo naming because
+ * they don't allow groups and repos to share the same name. The simplest
+ * example is platform/build and platform/build/soong, creating the latter
+ * will cause the group platform/build to collide with the repo.
+ *
+ * A workaround for this is to replace slashes with underscores and put
+ * all repos in a flat namespace. To prevent ambiguity underscores in the
+ * project names must be escaped with a double underscore.
+ */
+static void flatten_project_name(char* dest, const char* source)
+{
+	for (; *source; ++source)
+	{
+		switch (*source)
+		{
+			case '/':
+				*dest++ = '_';
+				break;
+			case '_':
+				*dest++ = '_';
+				*dest++ = '_';
+				break;
+			default:
+				*dest++ = *source;
+				break;
+		}
+	}
+
+	*dest = 0;
+}
+
+/*
+ * Similarily to the above we need to convert the last component of the
+ * manifest repo's URL back to the "canonical" form. This is needed to
+ * handle relative remote paths in the manifest correctly.
+ */
+static void unflatten_manifest_url(char* dest, const char* source)
+{
+	const char *start = source;
+	const char *last_component = source;
+	for (; *source; ++source)
+	{
+		if (*source == '/')
+			last_component = source + 1;
+	}
+
+	for (source = start; source != last_component; ++source)
+		*dest++ = *source;
+
+	for (source = last_component; *source; ++source)
+	{
+		switch (*source)
+		{
+		case '_':
+			if (source[1] == '_')
+			{
+				*dest++ = *source++;
+				break;
+			}
+
+			*dest++ = '/';
+			break;
+
+		default:
+			*dest++ = *source;
+			break;
+		}
+	}
 }
 
 static void* frepo_sync_manifest__thread(void* param)
@@ -148,9 +220,13 @@ static void* frepo_sync_manifest__thread(void* param)
 		}
 	}
 
-	char* remote_full
-		= path_join(tp->manifest_url,
-			project->remote);
+	char manifest_url[strlen(tp->manifest_url) + 1];
+	if (tp->flatten_urls)
+		unflatten_manifest_url(manifest_url, tp->manifest_url);
+	else
+		strcpy(manifest_url, tp->manifest_url);
+
+	char* remote_full = path_join(manifest_url, project->remote);
 	if (!remote_full)
 	{
 		fprintf(stderr,
@@ -161,10 +237,16 @@ static void* frepo_sync_manifest__thread(void* param)
 		return NULL;
 	}
 
+	char project_name[(strlen(project->name) * 2) + 1];
+	if (tp->flatten_urls)
+		flatten_project_name(project_name, project->name);
+	else
+		strcpy(project_name, project->name);
+
 	bool update_success = git_update(
 		project->path,
 		remote_full,
-		project->name,
+		project_name,
 		project->remote_name,
 		project->revision, tp->mirror);
 
@@ -183,7 +265,7 @@ static void* frepo_sync_manifest__thread(void* param)
 		update_success = git_update(
 			project->path,
 			remote_full,
-			project->name,
+			project_name,
 			project->remote_name,
 			project->revision, tp->mirror);
 	}
@@ -261,7 +343,7 @@ static void* frepo_sync_manifest__thread(void* param)
 
 static bool frepo_sync_manifest(
 	manifest_t* manifest, const char* url,
-	bool mirror, long int threads)
+	bool mirror, bool flatten_urls, long int threads)
 {
 	if (!manifest)
 		return false;
@@ -285,6 +367,7 @@ static bool frepo_sync_manifest(
 		tp[i].manifest_url = url;
 		tp[i].manifest     = manifest;
 		tp[i].mirror       = mirror;
+		tp[i].flatten_urls = flatten_urls;
 		tp[i].semaphore    = &semaphore;
 		tp[i].retries      = 8;
 		tp[i].retry_delay  = 100;
@@ -365,9 +448,9 @@ static bool frepo_sync_manifest(
 
 static int frepo_init(
 	manifest_t* manifest, const char* url,
-	bool mirror, long int threads)
+	bool mirror, bool flatten_urls, long int threads)
 {
-	return (frepo_sync_manifest(manifest, url, mirror, threads)
+	return (frepo_sync_manifest(manifest, url, mirror, flatten_urls, threads)
 		? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
@@ -376,6 +459,7 @@ static int frepo_sync(
 	const char* manifest_repo,
 	const char* manifest_path,
 	const char* manifest_url,
+	bool flatten_urls,
 	bool force, const char* branch,
 	group_t* group, unsigned group_count,
 	long int threads)
@@ -542,7 +626,7 @@ static int frepo_sync(
 			}
 		}
 
-		if (!frepo_sync_manifest(manifest_updated, manifest_url, false, threads))
+		if (!frepo_sync_manifest(manifest_updated, manifest_url, false, flatten_urls, threads))
 			return EXIT_FAILURE;
 	}
 
@@ -974,6 +1058,17 @@ int main(int argc, char* argv[])
 				}
 				settings->mirror = true;
 			}
+			else if (strcmp(argv[a], "--flatten-urls") == 0)
+			{
+				if (command != frepo_command_init)
+				{
+					fprintf(stderr,
+						"Error: --flatten-urls flag invalid for command.\n");
+					print_usage(argv[0]);
+					return EXIT_FAILURE;
+				}
+				settings->flatten_urls = true;
+			}
 			else
 			{
 				fprintf(stderr,
@@ -1186,7 +1281,7 @@ int main(int argc, char* argv[])
 		case frepo_command_init:
 			ret = frepo_init(
 				manifest, settings->manifest_url,
-				settings->mirror, threads);
+				settings->mirror, settings->flatten_urls, threads);
 			break;
 		case frepo_command_sync:
 			ret = frepo_sync(
@@ -1194,6 +1289,7 @@ int main(int argc, char* argv[])
 				settings->manifest_repo,
 				manifest_path,
 				settings->manifest_url,
+				settings->flatten_urls,
 				force, branch,
 				settings->group,
 				settings->group_count,
