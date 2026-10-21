@@ -22,7 +22,6 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
-#include <ctype.h>
 #include <stdio.h>
 #include <limits.h>
 #include <assert.h>
