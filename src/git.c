@@ -196,7 +196,7 @@ bool git_update(
 
 			if (remote_path)
 			{
-				if (remote_path[strlen(remote_path) - 1] != '/')
+				if (cmd[strlen(cmd) - 1] != '/')
 					strcat(cmd, "/");
 				strcat(cmd, remote_path);
 			}
@@ -211,7 +211,7 @@ bool git_update(
 
 		if (remote_path)
 		{
-			if (remote_path[strlen(remote_path) - 1] != '/')
+			if (cmd[strlen(cmd) - 1] != '/')
 				strcat(cmd, "/");
 			strcat(cmd, remote_path);
 		}
