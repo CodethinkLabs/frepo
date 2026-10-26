@@ -89,6 +89,18 @@ static int do_copyfile(
 	return system(buf);
 }
 
+static char* reponame(char* path)
+{
+	path = basename(path);
+
+	/* strip .git suffix */
+	size_t pathlen = strlen(path);
+	if (pathlen >= 5 && !strcmp(path + pathlen - 4, ".git"))
+		path[pathlen-4] = '\0';
+
+	return path;
+}
+
 static void* frepo_sync_manifest__thread(void* param)
 {
 	volatile struct manifest_thread_params* tp
@@ -1019,6 +1031,13 @@ int main(int argc, char* argv[])
 
 	if (command == frepo_command_init)
 	{
+		if (!repo)
+		{
+			fprintf(stderr,
+				"Error: No repository URL provided.\n");
+			return EXIT_FAILURE;
+		}
+
 		if (!settings_manifest_url_set(
 			settings, repo))
 		{
@@ -1027,10 +1046,10 @@ int main(int argc, char* argv[])
 			return EXIT_FAILURE;
 		}
 
-		char brepo[strlen(settings->manifest_repo) + 1];
-		strcpy(brepo, settings->manifest_repo);
+		char brepo[strlen(repo) + 1];
+		strcpy(brepo, repo);
 		if (!settings_manifest_repo_set(
-			settings, basename(brepo)))
+			settings, reponame(brepo)))
 		{
 			fprintf(stderr,
 				"Error: Failed to set repository name from URL.\n");
