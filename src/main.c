@@ -1019,6 +1019,13 @@ int main(int argc, char* argv[])
 
 	if (command == frepo_command_init)
 	{
+		if (!repo)
+		{
+			fprintf(stderr,
+				"Error: No repository URL provided.\n");
+			return EXIT_FAILURE;
+		}
+
 		if (!settings_manifest_url_set(
 			settings, repo))
 		{
